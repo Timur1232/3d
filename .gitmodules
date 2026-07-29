@@ -1,0 +1,3 @@
+[submodule "tinyobj"]
+	path = tinyobj
+	url = https://github.com/Timur1232/tinyobj.odin.git
