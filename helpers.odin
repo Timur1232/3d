@@ -1,6 +1,6 @@
 package main
 
-TEMP_STRING_BUFFER_SIZE :: #config(TEMP_STRING_BUFFER_SIZE, 1024)
+TEMP_STRING_BUFFER_SIZE :: #config(TEMP_STRING_BUFFER_SIZE, 1024*4)
 TEMP_STRING_BUFFER_STATIC :: #config(TEMP_STRING_BUFFER_STATIC, true)
 
 to_csrt_temp :: proc(str: string) -> cstring {

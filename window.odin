@@ -10,7 +10,7 @@ Window :: struct {
     height: i32,
     title: string,
 
-    frames_count: int,
+    frames_count: u64,
 
     keys: []Key_State,
 
@@ -18,6 +18,7 @@ Window :: struct {
     mouse_pos: Vector2_f64,
     prev_mouse_pos: Vector2_f64,
     mouse_delta: Vector2_f64,
+    mouse_scroll: Vector2_f64,
 
     is_current_context: bool,
 }
@@ -32,9 +33,10 @@ Create_Window_Error :: union #shared_nil {
 }
 
 // Automaticaly make created window as current context
-init_window :: proc(window: ^Window, width, height: i32, title: string) -> (err: Create_Window_Error) {
+init_window :: proc(window: ^Window, width, height: i32, title: string, debug := false) -> (err: Create_Window_Error) {
     defer if err != nil {
         destroy_window(window)
+        log.error("Unable to create window: %v", err)
     }
 
     glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, gl_version_major)
@@ -67,15 +69,35 @@ init_window :: proc(window: ^Window, width, height: i32, title: string) -> (err:
     glfw.SetFramebufferSizeCallback(window_handle, proc "c" (window: glfw.WindowHandle, width, height: i32) {
         w := cast(^Window)glfw.GetWindowUserPointer(window)
         assert_contextless(w != nil)
-        make_context(w)
-        gl.Viewport(0, 0, width, height)
+
+        current_window := make_context(w)
+
         w.height = height
         w.width = width
+        gl.Viewport(0, 0, width, height)
+
+        if current_window != nil {
+            make_context(current_window)
+        }
     })
 
     glfw.SetKeyCallback(window_handle, key_callback)
     glfw.SetMouseButtonCallback(window_handle, mouse_callback)
     glfw.SetCursorPosCallback(window_handle, mouse_cursor_callback)
+    glfw.SetScrollCallback(window_handle, mouse_scroll_callback)
+
+    if debug {
+        gl.Enable(gl.DEBUG_OUTPUT)
+        gl.Enable(gl.DEBUG_OUTPUT_SYNCHRONOUS)
+        gl.DebugMessageCallback(proc "c" (source: u32, type: u32, id: u32, severity: u32, length: i32, message: cstring, userParam: rawptr) {
+            libc.printf("OpenGL message: %s\n", message)
+        }, nil)
+        log.info("Debug output is enabled")
+    }
+
+    gl.Enable(gl.DEPTH_TEST);
+
+    log.infof("Window created\n    TITLE: %s\n    WIDTH: %v\n    HIEGHT: %v", title, width, height)
 
     return
 }
@@ -84,12 +106,11 @@ destroy_window :: proc(w: ^Window) {
     if w == nil do return
     if w.keys != nil do delete(w.keys)
     if w.mouse_buttons != nil do delete(w.mouse_buttons)
-    free(w)
     glfw.DestroyWindow(w.handle)
     clear_context()
 }
 
-get_current_window :: proc "contextless" () -> ^Window {
+get_current_window :: #force_inline proc "contextless" () -> ^Window {
     current_handle := glfw.GetCurrentContext()
     if current_handle != nil {
         current_window := cast(^Window)glfw.GetWindowUserPointer(current_handle)
@@ -99,15 +120,24 @@ get_current_window :: proc "contextless" () -> ^Window {
     return nil
 }
 
+get_window_from_handle :: #force_inline proc "contextless" (handle: glfw.WindowHandle) -> ^Window {
+    w := cast(^Window)glfw.GetWindowUserPointer(handle)
+    assert_contextless(w != nil)
+    return w
+}
+
 // TODO: I dont know if this is a good way to handle window context
-make_context :: proc "contextless" (w: ^Window) {
-    if w.is_current_context do return
+//
+// Returns window of previous context (before MakeContextCurrent call) if there was any or nil
+make_context :: proc "contextless" (w: ^Window) -> ^Window {
+    if w.is_current_context do return nil
     current_window := get_current_window()
     if current_window != nil {
         current_window.is_current_context = false
     }
     glfw.MakeContextCurrent(w.handle)
     w.is_current_context = true
+    return current_window
 }
 
 clear_context :: proc "contextless" () {
@@ -181,15 +211,14 @@ null_frame :: 0
 invalid_action :: -1
 
 Key_State :: struct {
-    frame: int,
+    frame: u64,
     action: i32, // glfw.PRESS, glfw.RELEASE, glfw.REPEAT
 }
 
 // ===============================[Callbacks]=============================== //
 
 key_callback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32) {
-    w := cast(^Window)glfw.GetWindowUserPointer(window)
-    assert_contextless(w != nil)
+    w := get_window_from_handle(window)
     if int(key) < len(w.keys) {
         w.keys[key].frame = w.frames_count
         w.keys[key].action = action
@@ -197,8 +226,7 @@ key_callback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods
 }
 
 mouse_callback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32) {
-    w := cast(^Window)glfw.GetWindowUserPointer(window)
-    assert_contextless(w != nil)
+    w := get_window_from_handle(window)
     if int(button) < len(w.mouse_buttons) {
         w.mouse_buttons[button].frame = w.frames_count
         w.mouse_buttons[button].action = action
@@ -206,12 +234,21 @@ mouse_callback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32
 }
 
 mouse_cursor_callback :: proc "c" (window: glfw.WindowHandle, x, y: f64) {
-    w := cast(^Window)glfw.GetWindowUserPointer(window)
-    assert_contextless(w != nil)
+    w := get_window_from_handle(window)
     w.mouse_pos.x = x
     w.mouse_pos.y = y
 }
 
+mouse_scroll_callback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
+    w := get_window_from_handle(window)
+    w.mouse_scroll.x = xoffset
+    w.mouse_scroll.y = yoffset
+}
+
+
+
 import "vendor:glfw"
 import gl "vendor:OpenGL"
 import "base:runtime"
+import "core:c/libc"
+import "core:log"
