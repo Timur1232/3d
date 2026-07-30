@@ -13,7 +13,7 @@ Shader :: struct {
 }
 
 Shader_Program :: struct {
-    program_id: u32,
+    id: u32,
 }
 
 // NOTE: Deleting shader doesn't make it invalid
@@ -67,7 +67,7 @@ shader_delete :: #force_inline proc(shader: Shader) {
 
 // NOTE: Deleting shader program doesn't make it invalid
 shader_program_valid :: #force_inline proc(program: Shader_Program) -> bool {
-    return program.program_id != 0
+    return program.id != 0
 }
 
 shader_program_create :: proc(vertex_shader, fragment_shader: Shader, loc := #caller_location) -> (program: Shader_Program, ok: bool) {
@@ -77,7 +77,7 @@ shader_program_create :: proc(vertex_shader, fragment_shader: Shader, loc := #ca
         log.warn("Compute shaders are not supported through current API for now. Use native gl function to create program.")
     }
 
-    program.program_id = gl.CreateProgram()
+    program.id = gl.CreateProgram()
     if !shader_program_valid(program) {
         log.error("Unable to create shader program", location = loc)
         ok = false
@@ -86,20 +86,20 @@ shader_program_create :: proc(vertex_shader, fragment_shader: Shader, loc := #ca
 
     defer if !ok {
         shader_program_delete(program)
-        program.program_id = 0
+        program.id = 0
     }
 
-    gl.AttachShader(program.program_id, vertex_shader.id)
-    gl.AttachShader(program.program_id, fragment_shader.id)
+    gl.AttachShader(program.id, vertex_shader.id)
+    gl.AttachShader(program.id, fragment_shader.id)
 
-    gl.LinkProgram(program.program_id)
+    gl.LinkProgram(program.id)
 
     success: i32
-    gl.GetProgramiv(program.program_id, gl.LINK_STATUS, &success)
+    gl.GetProgramiv(program.id, gl.LINK_STATUS, &success)
 
     if success == 0 {
         @(static) info_log: [512]u8
-        gl.GetProgramInfoLog(program.program_id, 512, nil, raw_data(info_log[:]))
+        gl.GetProgramInfoLog(program.id, 512, nil, raw_data(info_log[:]))
         log.error("Unable to link shader program: %s", string(info_log[:]), location = loc)
         ok = false
         return
@@ -111,11 +111,11 @@ shader_program_create :: proc(vertex_shader, fragment_shader: Shader, loc := #ca
 
 // NOTE: Deleting shader program doesn't make it invalid
 shader_program_delete :: #force_inline proc(program: Shader_Program) {
-    gl.DeleteProgram(program.program_id)
+    gl.DeleteProgram(program.id)
 }
 
 shader_program_use :: #force_inline proc(program: Shader_Program) {
-    gl.UseProgram(program.program_id)
+    gl.UseProgram(program.id)
 }
 
 import gl "vendor:OpenGL"

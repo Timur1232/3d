@@ -165,6 +165,12 @@ end_frame :: proc(w: ^Window) {
     w.mouse_delta = w.mouse_pos - w.prev_mouse_pos
 }
 
+window_aspect :: #force_inline proc(w: ^Window) -> f32 {
+    return f32(w.width) / f32(w.height)
+}
+
+// ===============================[Input]=============================== //
+
 is_key_pressed :: proc(w: ^Window, key: i32) -> bool {
     if w.keys[key].frame == null_frame do return false
     res := w.keys[key].action == glfw.PRESS && w.keys[key].frame == w.frames_count

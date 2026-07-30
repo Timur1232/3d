@@ -13,6 +13,9 @@ model_data := #load(model_path)
 vertex_shader_source := string(#load(shaders_dir+"vs.glsl"))
 fragment_shader_source := string(#load(shaders_dir+"fs.glsl"))
 
+batch_vs_source := string(#load(shaders_dir+"primitive_vs.glsl"))
+batch_fs_source := string(#load(shaders_dir+"primitive_fs.glsl"))
+
 wireframe := false
 fov  : f32 : 60
 near :: 0.1
@@ -82,15 +85,15 @@ main :: proc() {
     shader_delete(vertex_shader)
     shader_delete(fragment_shader)
 
-    model_uniform := gl.GetUniformLocation(program.program_id, "u_model")
-    view_uniform := gl.GetUniformLocation(program.program_id, "u_view")
-    perspective_uniform := gl.GetUniformLocation(program.program_id, "u_perspective")
+    model_uniform := gl.GetUniformLocation(program.id, "u_model")
+    view_uniform := gl.GetUniformLocation(program.id, "u_view")
+    perspective_uniform := gl.GetUniformLocation(program.id, "u_perspective")
 
-    time_uniform := gl.GetUniformLocation(program.program_id, "u_time")
-    light_uniform := gl.GetUniformLocation(program.program_id, "u_light")
+    time_uniform := gl.GetUniformLocation(program.id, "u_time")
+    light_uniform := gl.GetUniformLocation(program.id, "u_light")
 
     light_pos := linalg.normalize(Vector3{ 1, 2, 2.5 })
-    gl.ProgramUniform3fv(program.program_id, light_uniform, 1, raw_data(light_pos[:]))
+    gl.ProgramUniform3fv(program.id, light_uniform, 1, raw_data(light_pos[:]))
 
     scene: tinyobj.Scene
     tinyobj_cfg := tinyobj.default_config()
@@ -132,6 +135,30 @@ main :: proc() {
         delete(indices)
     }
 
+    batch_vs: Shader
+    batch_vs, ok = shader_create_from_source(.Vertex, batch_vs_source)
+    if !ok {
+        log.fatal("Problem with batch vertex shader")
+        return
+    }
+    batch_fs: Shader
+    batch_fs, ok = shader_create_from_source(.Fragment, batch_fs_source)
+    if !ok {
+        log.fatal("Problem with batch fragment shader")
+        return
+    }
+
+    batch_program: Shader_Program
+    batch_program, ok = shader_program_create(batch_vs, batch_fs)
+    if !ok {
+        log.fatal("Problem with batch shader")
+        return
+    }
+
+    batch: Draw_Batch
+    draw_batch_init(&batch, 1024, 256, batch_program)
+    defer draw_batch_destroy(&batch)
+
     vao: u32
     vbo: u32
     ebo: u32
@@ -156,6 +183,7 @@ main :: proc() {
     translate := linalg.matrix4_translate_f32({ 0, 0, -5 })
 
     camera: Camera
+    camera.fov = fov
 
     // window2: Window
     // if err := init_window(&window2, 800, 600, "Hello from second window"); err != nil {
@@ -242,7 +270,7 @@ main :: proc() {
 
             shader_program_use(program)
 
-            perspective := linalg.matrix4_perspective(math.to_radians(fov), f32(window.width)/f32(window.height), near, far)
+            perspective := linalg.matrix4_perspective(math.to_radians(camera.fov), f32(window.width)/f32(window.height), near, far)
             view := camera_view(camera)
             rotate := linalg.matrix4_rotate_f32(time_elapsed, { 0, 1, 0 })
             model := translate*rotate*scale
@@ -259,6 +287,14 @@ main :: proc() {
 
             gl.BindVertexArray(vao)
             gl.DrawElements(gl.TRIANGLES, i32(len(indices)*3), gl.UNSIGNED_INT, nil)
+
+            draw_line(&batch, {0, 0, 0}, {1, 0, 0}, {1, 0, 0})
+            draw_line(&batch, {0, 0, 0}, {0, 1, 0}, {1, 0, 0})
+            draw_line(&batch, {1, 0, 0}, {1, 1, 0}, {1, 0, 0})
+            draw_line(&batch, {0, 1, 0}, {1, 1, 0}, {1, 0, 0})
+
+            render_batch(&batch, &window, camera)
+
         }
 
         // {
