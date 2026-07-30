@@ -4,34 +4,19 @@ gl_version_major :: 4
 gl_version_minor :: 6
 
 assets_dir :: "assets/"
+models_dir :: assets_dir+"models/"
+shaders_dir :: assets_dir+"shaders/"
 
-model_path :: assets_dir+"models/monkey.obj"
+model_path :: models_dir+"monkey.obj"
 model_data := #load(model_path)
 
-window_width : i32 = 800
-window_height : i32 = 600
-
-vertex_shader_source := string(#load(assets_dir+"shaders/vs.glsl"))
-fragment_shader_source := string(#load(assets_dir+"shaders/fs.glsl"))
+vertex_shader_source := string(#load(shaders_dir+"vs.glsl"))
+fragment_shader_source := string(#load(shaders_dir+"fs.glsl"))
 
 wireframe := false
 fov  : f32 : 60
 near :: 0.1
 far  :: 100
-
-identity4f32 :: matrix[4, 4]f32 {
-    1, 0, 0, 0,
-    0, 1, 0, 0,
-    0, 0, 1, 0,
-    0, 0, 0, 1,
-}
-identity3f32 :: matrix[3, 3]f32 {
-    1, 0, 0,
-    0, 1, 0,
-    0, 0, 1,
-}
-
-Vector3 :: [3]f32
 
 Vertex :: struct {
     position: Vector3,
@@ -40,6 +25,7 @@ Vertex :: struct {
 
 main :: proc() {
 
+    // For repeate key event would work on wayland
     glfw.InitHint(glfw.PLATFORM, glfw.PLATFORM_X11);
 
     if !glfw.Init() {
@@ -48,35 +34,13 @@ main :: proc() {
     }
     defer glfw.Terminate()
 
-    glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, gl_version_major)
-    glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, gl_version_minor)
-    glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-    glfw.WindowHint(glfw.OPENGL_DEBUG_CONTEXT, true)
-
-    window := glfw.CreateWindow(window_width, window_height, "Hello from OpenGL", nil, nil)
-    if window == nil {
-        log.fatal("Unable to create window")
-        return
+    window: Window
+    if create_window_err := init_window(&window, 800, 600, "Hello from OpenGL"); create_window_err != nil {
+        log.fatal("Unable to create window: %v", create_window_err)
     }
-    defer glfw.DestroyWindow(window)
-    glfw.MakeContextCurrent(window)
+    defer destroy_window(&window)
 
-    glfw.SwapInterval(1)
-
-    gl.load_up_to(gl_version_major, gl_version_minor, glfw.gl_set_proc_address)
-    gl.Viewport(0, 0, window_width, window_height)
-
-    glfw.SetFramebufferSizeCallback(window, proc "c" (window: glfw.WindowHandle, width, height: i32) {
-        gl.Viewport(0, 0, width, height)
-        window_height = height
-        window_width = width
-    })
-
-    glfw.SetKeyCallback(window, key_callback)
-    glfw.SetMouseButtonCallback(window, mouse_callback)
-    glfw.SetCursorPosCallback(window, mouse_cursor_callback)
-
-    glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_DISABLED)
+    glfw.SetInputMode(window.handle, glfw.CURSOR, glfw.CURSOR_DISABLED)
 
     gl.Enable(gl.DEBUG_OUTPUT)
     gl.Enable(gl.DEBUG_OUTPUT_SYNCHRONOUS)
@@ -193,30 +157,33 @@ main :: proc() {
     yaw: f32 = -90
     pitch: f32
 
-    for !glfw.WindowShouldClose(window) {
+    for !glfw.WindowShouldClose(window.handle) {
         defer free_all(context.temp_allocator)
 
-        if is_key_pressed(glfw.KEY_ESCAPE) {
-            glfw.SetWindowShouldClose(window, true)
+        start_frame(&window)
+        defer end_frame(&window)
+
+        if is_key_pressed(&window, glfw.KEY_ESCAPE) {
+            glfw.SetWindowShouldClose(window.handle, true)
         }
-        if is_key_pressed(glfw.KEY_SPACE) {
+        if is_key_pressed(&window, glfw.KEY_SPACE) {
             wireframe = !wireframe
             gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE if wireframe else gl.FILL)
         }
 
-        forward_move_dir := i32(is_key_down(glfw.KEY_W)) - i32(is_key_down(glfw.KEY_S))
+        forward_move_dir := i32(is_key_down(&window, glfw.KEY_W)) - i32(is_key_down(&window, glfw.KEY_S))
         if forward_move_dir != 0 {
             camera_pos += f32(forward_move_dir)*camera_dir*camera_speed
         }
-        sideways_move_dir := i32(is_key_down(glfw.KEY_A)) - i32(is_key_down(glfw.KEY_D))
+        sideways_move_dir := i32(is_key_down(&window, glfw.KEY_A)) - i32(is_key_down(&window, glfw.KEY_D))
         if sideways_move_dir != 0 {
             camera_right := linalg.normalize(linalg.cross(up, camera_dir))
             camera_pos += f32(sideways_move_dir)*camera_right*camera_speed
         }
 
         sensitivity :: 0.1
-        yaw += f32(mouse_delta.x)*sensitivity
-        pitch = clamp(pitch - f32(mouse_delta.y)*sensitivity, -89, 89)
+        yaw += f32(window.mouse_delta.x)*sensitivity
+        pitch = clamp(pitch - f32(window.mouse_delta.y)*sensitivity, -89, 89)
 
         camera_dir.x = math.cos(math.to_radians(yaw)) * math.cos(math.to_radians(pitch))
         camera_dir.y = math.sin(math.to_radians(pitch))
@@ -229,7 +196,7 @@ main :: proc() {
 
         gl.UseProgram(program)
 
-        perspective := linalg.matrix4_perspective(math.to_radians(fov), f32(window_width)/f32(window_height), near, far)
+        perspective := linalg.matrix4_perspective(math.to_radians(fov), f32(window.width)/f32(window.height), near, far)
         perspective_flat := linalg.matrix_flatten(perspective)
         gl.UniformMatrix4fv(perspective_uniform, 1, false, raw_data(perspective_flat[:]))
 
@@ -246,18 +213,7 @@ main :: proc() {
         gl.BindVertexArray(vao)
         gl.DrawElements(gl.TRIANGLES, i32(len(indices)*3), gl.UNSIGNED_INT, nil)
 
-        // Swapping must be before polling events, because there is strange bug that would segfault on terminating glfw, presumably due to wayland generating some events on swap buffers, that need handaling.
-        glfw.SwapBuffers(window)
-
-        // Increment must be before polling events, so logic for saving frames for key presses would work.
-        frames_count += 1
-
-        prev_mouse_pos = mouse_pos
-        glfw.PollEvents()
-        mouse_delta = mouse_pos - prev_mouse_pos
-
         time_elapsed += f32(time.diff(start_time, time.now()))/f32(time.Second)
-
     }
 }
 
@@ -307,86 +263,6 @@ create_shader_program :: proc(vertex_shader, fragment_shader: u32, loc := #calle
     }
 
     return program, true
-}
-
-Key_State :: struct {
-    frame: int,
-    action: i32,
-}
-
-keys: [1024]Key_State
-frames_count: int
-
-is_key_pressed :: proc(key: i32) -> bool {
-    if keys[key].frame == 0 do return false
-    res := keys[key].action == glfw.PRESS && keys[key].frame == frames_count
-    return res
-}
-
-is_key_down :: proc(key: i32) -> bool {
-    if keys[key].frame == 0 do return false
-    res := (keys[key].action == glfw.PRESS || keys[key].action == glfw.REPEAT) && keys[key].frame <= frames_count
-    return res
-}
-
-is_key_up :: proc(key: i32) -> bool {
-    if keys[key].frame == 0 do return false
-    res := keys[key].action == glfw.RELEASE && keys[key].frame == frames_count
-    if res {
-        keys[key].frame = 0
-        keys[key].action = -1
-    }
-    return res
-}
-
-is_key_repeated :: proc(key: i32) -> bool {
-    if keys[key].frame == 0 do return false
-    res := keys[key].action == glfw.REPEAT && keys[key].frame == frames_count
-    return res
-}
-
-key_callback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32) {
-    keys[key].frame = frames_count
-    keys[key].action = action
-}
-
-Vector2f64 :: [2]f64
-
-mouse: [10]Key_State
-mouse_pos: Vector2f64
-prev_mouse_pos: Vector2f64
-mouse_delta: Vector2f64
-
-mouse_callback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32) {
-    mouse[button].frame = frames_count
-    mouse[button].action = action
-}
-
-mouse_cursor_callback :: proc "c" (window: glfw.WindowHandle, x, y: f64) {
-    mouse_pos.x = x
-    mouse_pos.y = y
-}
-
-is_mouse_pressed :: proc(button: i32) -> bool {
-    if mouse[button].frame == 0 do return false
-    res := mouse[button].action == glfw.PRESS && mouse[button].frame == frames_count
-    return res
-}
-
-is_mouse_down :: proc(button: i32) -> bool {
-    if mouse[button].frame == 0 do return false
-    res := (mouse[button].action == glfw.PRESS || mouse[button].action == glfw.REPEAT) && mouse[button].frame <= frames_count
-    return res
-}
-
-is_mouse_up :: proc(button: i32) -> bool {
-    if mouse[button].frame == 0 do return false
-    res := mouse[button].action == glfw.RELEASE && mouse[button].frame == frames_count
-    if res {
-        mouse[button].frame = 0
-        mouse[button].action = -1
-    }
-    return res
 }
 
 import gl "vendor:OpenGL"
