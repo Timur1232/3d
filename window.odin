@@ -69,7 +69,6 @@ init_window :: proc(window: ^Window, width, height: i32, title: string, debug :=
 
     glfw.SwapInterval(1)
 
-
     gl.load_up_to(GL_VERSION_MAJOR, GL_VERSION_MINOR, glfw.gl_set_proc_address)
     gl.Viewport(0, 0, width, height)
 
@@ -92,6 +91,7 @@ init_window :: proc(window: ^Window, width, height: i32, title: string, debug :=
     glfw.SetMouseButtonCallback(window_handle, mouse_callback)
     glfw.SetCursorPosCallback(window_handle, mouse_cursor_callback)
     glfw.SetScrollCallback(window_handle, mouse_scroll_callback)
+    glfw.SetCursorEnterCallback(window_handle, mouse_cursor_enter_callback)
 
     if debug {
         gl.Enable(gl.DEBUG_OUTPUT)
@@ -120,9 +120,13 @@ destroy_window :: proc(w: ^Window) {
     if w == nil do return
     if w.keys != nil do delete(w.keys)
     if w.mouse_buttons != nil do delete(w.mouse_buttons)
+    make_context(w)
+    glfw.SetWindowUserPointer(w.handle, nil)
     glfw.DestroyWindow(w.handle)
     clear_context()
     render_batch_destroy(&w.render_batch)
+
+    w^ = {} // null the fields
 
     log.infof("Window (title: \"%s\") closed", w.title)
 }
@@ -178,9 +182,7 @@ end_frame :: proc(w: ^Window) {
     glfw.SwapBuffers(w.handle)
 
     w.mouse_scroll = 0
-    glfw.PollEvents()
-
-    w.mouse_delta = w.mouse_pos - w.prev_mouse_pos
+    w.mouse_delta = 0
 }
 
 start_3d :: proc(w: ^Window, camera: Camera) {
@@ -267,14 +269,20 @@ mouse_callback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32
 
 mouse_cursor_callback :: proc "c" (window: glfw.WindowHandle, x, y: f64) {
     w := get_window_from_handle(window)
+    w.prev_mouse_pos = w.mouse_pos
     w.mouse_pos.x = x
     w.mouse_pos.y = y
+    w.mouse_delta = w.mouse_pos - w.prev_mouse_pos
 }
 
 mouse_scroll_callback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
     w := get_window_from_handle(window)
     w.mouse_scroll.x = xoffset
     w.mouse_scroll.y = yoffset
+}
+
+mouse_cursor_enter_callback :: proc "c" (window: glfw.WindowHandle, entered: i32) {
+    // w := get_window_from_handle(window)
 }
 
 // ===============================[Other]=============================== //

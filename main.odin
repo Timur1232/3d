@@ -68,8 +68,6 @@ main :: proc() {
     }
     defer destroy_window(&window)
 
-    glfw.SetInputMode(window.handle, glfw.CURSOR, glfw.CURSOR_DISABLED)
-
     ok: bool
     program_flat: Shader_Program
     program_flat, ok = shader_program_create_from_source(vs_source, flat_fs_source)
@@ -174,6 +172,8 @@ main :: proc() {
     draw_flat_shader := true
 
     camera: Camera
+    camera.position = {-3.6456196, 1.63629258, 1.87133658}
+    camera.angles = {49.500004, 20.49999}
     camera.fov = FOV
     camera.near = NEAR
     camera.far = FAR
@@ -189,8 +189,12 @@ main :: proc() {
     bounce_p2 := Vector2(150)
     bounce_vel2 := Vector2{ 5, -5 }
 
+    capture_cursor := false
+
     for !glfw.WindowShouldClose(window.handle) {
         defer free_all(context.temp_allocator)
+
+        defer glfw.PollEvents()
 
         start_time = time.now()
         defer {
@@ -265,9 +269,21 @@ main :: proc() {
                 log.info("FLAT SHADING:", draw_flat_shader)
             }
 
-            sensitivity :: 0.1
-            camera.angles.x += f32(window.mouse_delta.x)*sensitivity
-            camera.angles.y = clamp(camera.angles.y + f32(window.mouse_delta.y)*sensitivity, -89, 89)
+            if is_key_pressed(&window, glfw.KEY_C) {
+                log.infof("Camera info:\n    POSITION: %v\n    ANGLES: %v\n    FOV: %v\n    NEAR: %v\n    FAR: %v", camera.position, camera.angles, camera.fov, camera.near, camera.far)
+            }
+
+            if is_mouse_pressed(&window, glfw.MOUSE_BUTTON_LEFT) {
+                capture_cursor = !capture_cursor
+                glfw.SetInputMode(window.handle, glfw.CURSOR, glfw.CURSOR_DISABLED if capture_cursor else glfw.CURSOR_NORMAL)
+                log.info("CURSOR CAPTURE:", capture_cursor)
+            }
+
+            if capture_cursor {
+                sensitivity :: 0.15
+                camera.angles.x += f32(window.mouse_delta.x)*sensitivity
+                camera.angles.y = clamp(camera.angles.y + f32(window.mouse_delta.y)*sensitivity, -89, 89)
+            }
 
             gl.ClearColor(f32(BACKGROUND_COLOR.x)/255, f32(BACKGROUND_COLOR.y)/255, f32(BACKGROUND_COLOR.z)/255, 1)
             gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
@@ -329,6 +345,17 @@ main :: proc() {
                     draw_rectangle_3d(&window.render_batch, {-1, 0.5, 2}, {2, 1}, 45, 45, {1, 0, 1})
                 end_camera_3d(&window.render_batch, &window)
 
+                if !capture_cursor {
+                    mouse_pos := vector_cast(f32, window.mouse_pos)
+                    draw_triangle_2d(
+                        &window.render_batch,
+                        mouse_pos,
+                        mouse_pos + {20, 0},
+                        mouse_pos + {0, 20},
+                        {1, 1, 0}
+                    )
+                    draw_line_2d(&window.render_batch, mouse_pos, mouse_pos + vector_cast(f32, window.mouse_delta), {0, 0, 1})
+                }
             end_drawing(&window.render_batch)
         }
 
@@ -379,7 +406,6 @@ main :: proc() {
             draw_rectangle_2d(&window2.render_batch, vector_cast(f32, window2.mouse_pos), {10, 10}, {1, 1, 0})
             end_drawing(&window2.render_batch)
         }
-
     }
 }
 
