@@ -16,11 +16,16 @@ Gl_Draw_Modes := [Draw_Mode]u32 {
     .Triangle = gl.TRIANGLES,
     .Quad = gl.TRIANGLE_STRIP, // draw two triangles instead of GL_QUADS
 }
+Draw_Opt :: enum {
+    Depth_Test,
+}
+Draw_Opts :: bit_set[Draw_Opt]
 
 Draw_Request :: struct {
     mode: Draw_Mode,
     vertex_count: i32,
     transform: Mat4,
+    opts: Draw_Opts,
 }
 
 Render_Batch :: struct {
@@ -34,6 +39,7 @@ Render_Batch :: struct {
     transform_uniform: i32,
 
     current_transform: Mat4,
+    draw_opts: Draw_Opts,
 
     vao: u32,
     vbo: u32,
@@ -130,11 +136,10 @@ set_vertex_vao :: proc() {
 begin_drawing :: proc(batch: ^Render_Batch, window: ^Window) {
     when ODIN_DEBUG do assert_current_context()
     batch.current_transform = window_ortho(window)
-    gl.Disable(gl.DEPTH_TEST)
+    batch.draw_opts -= { .Depth_Test }
 }
 end_drawing :: #force_inline proc(batch: ^Render_Batch) {
     render_batch(batch)
-    gl.Enable(gl.DEPTH_TEST)
 }
 
 begin_camera_3d :: proc(batch: ^Render_Batch, window: ^Window, camera: Camera) {
@@ -142,12 +147,12 @@ begin_camera_3d :: proc(batch: ^Render_Batch, window: ^Window, camera: Camera) {
     view := camera_view(camera)
     perspective := camera_perspective(camera, window_aspect(window))
     batch.current_transform = perspective * view
-    gl.Enable(gl.DEPTH_TEST)
+    batch.draw_opts += { .Depth_Test }
 }
 
 end_camera_3d :: proc(batch: ^Render_Batch, window: ^Window) {
     batch.current_transform = window_ortho(window)
-    gl.Disable(gl.DEPTH_TEST)
+    batch.draw_opts -= { .Depth_Test }
 }
 
 draw_line_3d :: proc(batch: ^Render_Batch, p1, p2: Vector3, color: Vector3) {
@@ -217,20 +222,21 @@ render_batch :: proc(batch: ^Render_Batch) {
 
     gl.BindVertexArray(batch.vao)
 
-    // fmt.println("==============================")
-
     gl.BindBuffer(gl.ARRAY_BUFFER, batch.vbo)
     gl.BufferSubData(gl.ARRAY_BUFFER, 0, size_of(Vertex)*batch.vertices_count, raw_data(batch.vertices[:batch.vertices_count]))
-
-    // fmt.printfln("batch.vertices = %v", batch.vertices[:batch.vertices_count])
 
     shader_program_use(batch.program)
 
     current_vertex_index: i32 = 0
-    // fmt.println("------------------------------")
     for draw in batch.draws[:batch.draws_count] {
+
+        if .Depth_Test in draw.opts {
+            gl.Enable(gl.DEPTH_TEST)
+        } else {
+            gl.Disable(gl.DEPTH_TEST)
+        }
+
         transform_flat := linalg.matrix_flatten(draw.transform)
-        // fmt.printfln("draw = %v", draw)
         gl.UniformMatrix4fv(batch.transform_uniform, 1, false, raw_data(transform_flat[:]))
         gl.DrawArrays(Gl_Draw_Modes[draw.mode], current_vertex_index, draw.vertex_count)
         current_vertex_index += draw.vertex_count
@@ -238,12 +244,15 @@ render_batch :: proc(batch: ^Render_Batch) {
 
     batch.draws_count = 0
     batch.vertices_count = 0
+
+    gl.Enable(gl.DEPTH_TEST)
 }
 
 append_draw_request :: #force_inline proc(batch: ^Render_Batch, mode: Draw_Mode) {
     draw_req := Draw_Request {
         mode = mode,
         transform = batch.current_transform,
+        opts = batch.draw_opts,
     }
     switch mode {
     case .Line:     draw_req.vertex_count = 2
