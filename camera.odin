@@ -8,12 +8,18 @@ Camera :: struct {
     position: Vector3,
     angles: Vector2, // { yaw, pitch }
     fov: f32,
+    near, far: f32,
 }
 
 @(require_results)
 camera_view :: #force_inline proc(camera: Camera) -> Mat4 {
     view := linalg.matrix4_look_at(camera.position, camera.position + camera_direction(camera), camera_up(camera))
     return view
+}
+
+camera_perspective :: #force_inline proc(camera: Camera, aspect: f32) -> Mat4 {
+    perspective := linalg.matrix4_perspective(math.to_radians(camera.fov), aspect, camera.near, camera.far)
+    return perspective
 }
 
 @(require_results)

@@ -156,7 +156,7 @@ main :: proc() {
     }
 
     batch: Draw_Batch
-    draw_batch_init(&batch, 1024, 256, batch_program)
+    draw_batch_init(&batch, 1024, 256, batch_program, &window)
     defer draw_batch_destroy(&batch)
 
     vao: u32
@@ -184,6 +184,8 @@ main :: proc() {
 
     camera: Camera
     camera.fov = fov
+    camera.near = near
+    camera.far = far
 
     // window2: Window
     // if err := init_window(&window2, 800, 600, "Hello from second window"); err != nil {
@@ -270,7 +272,8 @@ main :: proc() {
 
             shader_program_use(program)
 
-            perspective := linalg.matrix4_perspective(math.to_radians(camera.fov), f32(window.width)/f32(window.height), near, far)
+            // perspective := linalg.matrix4_perspective(math.to_radians(camera.fov), f32(window.width)/f32(window.height), near, far)
+            perspective := camera_perspective(camera, window_aspect(&window))
             view := camera_view(camera)
             rotate := linalg.matrix4_rotate_f32(time_elapsed, { 0, 1, 0 })
             model := translate*rotate*scale
@@ -288,13 +291,16 @@ main :: proc() {
             gl.BindVertexArray(vao)
             gl.DrawElements(gl.TRIANGLES, i32(len(indices)*3), gl.UNSIGNED_INT, nil)
 
-            draw_line(&batch, {0, 0, 0}, {1, 0, 0}, {1, 0, 0})
-            draw_line(&batch, {0, 0, 0}, {0, 1, 0}, {1, 0, 0})
-            draw_line(&batch, {1, 0, 0}, {1, 1, 0}, {1, 0, 0})
-            draw_line(&batch, {0, 1, 0}, {1, 1, 0}, {1, 0, 0})
+            begin_drawing(&batch, &window)
+                begin_camera_3d(&batch, camera)
+                    draw_line_3d(&batch, {0, 0, 0}, {1, 0, 0}, {1, 0, 0})
+                    draw_line_3d(&batch, {0, 0, 0}, {0, 1, 0}, {1, 0, 0})
+                    draw_line_3d(&batch, {1, 0, 0}, {1, 1, 0}, {1, 0, 0})
+                    draw_line_3d(&batch, {0, 1, 0}, {1, 1, 0}, {1, 0, 0})
+                end_camera_3d(&batch)
 
-            render_batch(&batch, &window, camera)
-
+                draw_line_2d(&batch, {10, 10}, {f32(window.width)-10, f32(window.height)-10}, {0, 1, 0})
+            end_drawing(&batch)
         }
 
         // {
