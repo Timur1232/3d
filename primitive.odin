@@ -130,12 +130,11 @@ set_vertex_vao :: proc() {
 begin_drawing :: proc(batch: ^Render_Batch, window: ^Window) {
     when ODIN_DEBUG do assert_current_context()
     batch.current_transform = window_ortho(window)
-    // fmt.println("BEGIN DRAWING")
-    // fmt.printfln("    current_transform = %v", batch.current_transform)
+    gl.Disable(gl.DEPTH_TEST)
 }
 end_drawing :: #force_inline proc(batch: ^Render_Batch) {
     render_batch(batch)
-    // fmt.println("END DRAWING")
+    gl.Enable(gl.DEPTH_TEST)
 }
 
 begin_camera_3d :: proc(batch: ^Render_Batch, window: ^Window, camera: Camera) {
@@ -143,13 +142,12 @@ begin_camera_3d :: proc(batch: ^Render_Batch, window: ^Window, camera: Camera) {
     view := camera_view(camera)
     perspective := camera_perspective(camera, window_aspect(window))
     batch.current_transform = perspective * view
-    // fmt.println("    BEGIN CAMERA 3D")
-    // fmt.printfln("       current_transform = %v", batch.current_transform)
+    gl.Enable(gl.DEPTH_TEST)
 }
 
 end_camera_3d :: proc(batch: ^Render_Batch, window: ^Window) {
     batch.current_transform = window_ortho(window)
-    // fmt.println("    END CAMERA 3D")
+    gl.Disable(gl.DEPTH_TEST)
 }
 
 draw_line_3d :: proc(batch: ^Render_Batch, p1, p2: Vector3, color: Vector3) {

@@ -394,16 +394,19 @@ main :: proc() {
             gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
             begin_drawing(&window2.render_batch, &window2)
-            draw_line_2d(&window2.render_batch, bounce_p1, bounce_p2, {0, 1, 0})
+                draw_line_2d(&window2.render_batch, bounce_p1, bounce_p2, {0, 1, 0})
 
-            draw_triangle_2d(&window2.render_batch,
-                {100, 100},
-                {200, 100},
-                {100, 200},
-                {0, 0, 1}
-            )
+                triangle_rot := linalg.matrix2_rotate(time_elapsed)
+                triangle_pos := Vector2{300, 300}
 
-            draw_rectangle_2d(&window2.render_batch, vector_cast(f32, window2.mouse_pos), {10, 10}, {1, 1, 0})
+                draw_triangle_2d(&window2.render_batch,
+                    triangle_rot * Vector2{0,   0} + triangle_pos,
+                    triangle_rot * Vector2{100, 0} + triangle_pos,
+                    triangle_rot * Vector2{0, 100} + triangle_pos,
+                    {0, 0, 1}
+                )
+
+                draw_rectangle_2d(&window2.render_batch, vector_cast(f32, window2.mouse_pos), {10, 10}, {1, 1, 0})
             end_drawing(&window2.render_batch)
         }
     }

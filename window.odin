@@ -126,9 +126,9 @@ destroy_window :: proc(w: ^Window) {
     clear_context()
     render_batch_destroy(&w.render_batch)
 
-    w^ = {} // null the fields
-
     log.infof("Window (title: \"%s\") closed", w.title)
+
+    w^ = {} // null the fields
 }
 
 get_current_window :: #force_inline proc "contextless" () -> ^Window {
@@ -200,25 +200,25 @@ window_aspect :: #force_inline proc(w: ^Window) -> f32 {
 // ===============================[Input]=============================== //
 
 is_key_pressed :: proc(w: ^Window, key: i32) -> bool {
-    if w.keys[key].frame == null_frame do return false
+    if w.keys[key].frame == 0 do return false
     res := w.keys[key].action == glfw.PRESS && w.keys[key].frame == w.frames_count
     return res
 }
 
 is_key_down :: proc(w: ^Window, key: i32) -> bool {
-    if w.keys[key].frame == null_frame do return false
+    if w.keys[key].frame == 0 do return false
     res := (w.keys[key].action == glfw.PRESS || w.keys[key].action == glfw.REPEAT) && w.keys[key].frame <= w.frames_count
     return res
 }
 
 is_key_up :: proc(w: ^Window, key: i32) -> bool {
-    if w.keys[key].frame == null_frame do return false
+    if w.keys[key].frame == 0 do return false
     res := w.keys[key].action == glfw.RELEASE && w.keys[key].frame == w.frames_count
     return res
 }
 
 is_key_repeated :: proc(w: ^Window, key: i32) -> bool {
-    if w.keys[key].frame == null_frame do return false
+    if w.keys[key].frame == 0 do return false
     res := w.keys[key].action == glfw.REPEAT && w.keys[key].frame == w.frames_count
     return res
 }
@@ -240,9 +240,6 @@ is_mouse_up :: proc(w: ^Window, button: i32) -> bool {
     res := w.mouse_buttons[button].action == glfw.RELEASE && w.mouse_buttons[button].frame == w.frames_count
     return res
 }
-
-null_frame :: 0
-invalid_action :: -1
 
 Key_State :: struct {
     frame: u64,
