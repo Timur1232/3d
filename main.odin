@@ -1,27 +1,35 @@
 package main
 
-gl_version_major :: 4
-gl_version_minor :: 6
+GL_VERSION_MAJOR :: 4
+GL_VERSION_MINOR :: 6
 
-assets_dir :: "assets/"
-models_dir :: assets_dir+"models/"
-shaders_dir :: assets_dir+"shaders/"
+ASSETS_DIR :: "assets/"
+MODELS_DIR :: ASSETS_DIR+"models/"
+SHADERS_DIR :: ASSETS_DIR+"shaders/"
 
-model_path :: models_dir+"monkey.obj"
-model_data := #load(model_path)
+MODEL_PATH :: MODELS_DIR+"monkey.obj"
+@(private="file")
+model_data := #load(MODEL_PATH)
 
-vertex_shader_source := string(#load(shaders_dir+"vs.glsl"))
-fragment_shader_source := string(#load(shaders_dir+"fs.glsl"))
+@(private="file")
+vs_source := string(#load(SHADERS_DIR+"vs.glsl"))
+@(private="file")
+flat_fs_source := string(#load(SHADERS_DIR+"flat_fs.glsl"))
+@(private="file")
+smooth_fs_source := string(#load(SHADERS_DIR+"smooth_fs.glsl"))
 
-batch_vs_source := string(#load(shaders_dir+"primitive_vs.glsl"))
-batch_fs_source := string(#load(shaders_dir+"primitive_fs.glsl"))
+@(private="file")
+wireframe_vs_source := string(#load(SHADERS_DIR+"wireframe_vs.glsl"))
+@(private="file")
+wireframe_fs_source := string(#load(SHADERS_DIR+"wireframe_fs.glsl"))
 
-wireframe := false
-fov  : f32 : 60
-near :: 0.1
-far  :: 100
+FOV  : f32 : 60
+NEAR :: 0.1
+FAR  :: 100
 
 LOWEST_LOG_LEVEL : log.Level : .Debug when ODIN_DEBUG else .Info
+
+BACKGROUND_COLOR :: Color{ 0xCC, 0xCC, 0xCC }
 
 main :: proc() {
     logger := log.create_console_logger(lowest = LOWEST_LOG_LEVEL, opt = {
@@ -63,43 +71,42 @@ main :: proc() {
     glfw.SetInputMode(window.handle, glfw.CURSOR, glfw.CURSOR_DISABLED)
 
     ok: bool
-    vertex_shader: Shader
-    if vertex_shader, ok = shader_create_from_source(.Vertex, vertex_shader_source); !ok {
-        log.fatal("Problem with vertex shader")
-        return
-    }
-
-    fragment_shader: Shader
-    if fragment_shader, ok = shader_create_from_source(.Fragment, fragment_shader_source); !ok {
-        log.fatal("Problem with fragment shader")
-        return
-    }
-
-    program: Shader_Program
-    if program, ok = shader_program_create(vertex_shader, fragment_shader); !ok {
+    program_flat: Shader_Program
+    program_flat, ok = shader_program_create_from_source(vs_source, flat_fs_source)
+    if !ok {
         log.fatal("Problem with shader program")
         return
     }
-    defer shader_program_delete(program)
-
-    shader_delete(vertex_shader)
-    shader_delete(fragment_shader)
-
-    model_uniform := gl.GetUniformLocation(program.id, "u_model")
-    view_uniform := gl.GetUniformLocation(program.id, "u_view")
-    perspective_uniform := gl.GetUniformLocation(program.id, "u_perspective")
-
-    time_uniform := gl.GetUniformLocation(program.id, "u_time")
-    light_uniform := gl.GetUniformLocation(program.id, "u_light")
+    defer shader_program_delete(program_flat)
 
     light_pos := linalg.normalize(Vector3{ 1, 2, 2.5 })
-    gl.ProgramUniform3fv(program.id, light_uniform, 1, raw_data(light_pos[:]))
+    shader_program_default_uniform(program_flat, .Light_Pos, light_pos)
+
+    program_smooth: Shader_Program
+    program_smooth, ok = shader_program_create_from_source(vs_source, smooth_fs_source)
+    if !ok {
+        log.fatal("Problem with shader program")
+        return
+    }
+    defer shader_program_delete(program_smooth)
+
+    shader_program_default_uniform(program_smooth, .Light_Pos, light_pos)
+
+    wireframe_program: Shader_Program
+    wireframe_program, ok = shader_program_create_from_source(wireframe_vs_source, wireframe_fs_source)
+    if !ok {
+        log.error("Problem with wireframe shader program")
+    }
+    defer shader_program_delete(wireframe_program)
+
+    wireframe_color_uniform := gl.GetUniformLocation(wireframe_program.id, "u_wireframe_color")
+    gl.ProgramUniform3f(wireframe_program.id, wireframe_color_uniform, 0, 0, 0)
 
     scene: tinyobj.Scene
     tinyobj_cfg := tinyobj.default_config()
     res := tinyobj.load_obj_from_memory(&scene, raw_data(model_data), len(model_data), &tinyobj_cfg, nil)
     if res != .Ok {
-        log.error("Unable to load obj file %s: %s", model_path, tinyobj.result_string(res))
+        log.error("Unable to load obj file %s: %s", MODEL_PATH, tinyobj.result_string(res))
     }
     defer tinyobj.scene_free(&scene)
 
@@ -120,11 +127,15 @@ main :: proc() {
         indices = make([]u32, len(scene_indices))
         for idx, i in scene_indices {
             indices[i] = u32(idx.vertex_index)
-            vertices[idx.vertex_index].normal = {
+            vertices[idx.vertex_index].normal += {
                 scene.attrib.normals.ptr[idx.normal_index*3 + 0],
                 scene.attrib.normals.ptr[idx.normal_index*3 + 1],
                 scene.attrib.normals.ptr[idx.normal_index*3 + 2],
             }
+        }
+
+        for &v in vertices {
+            v.normal = linalg.normalize(v.normal)
         }
     } else {
         log.warn("No model was loaded")
@@ -134,30 +145,6 @@ main :: proc() {
         delete(vertices)
         delete(indices)
     }
-
-    batch_vs: Shader
-    batch_vs, ok = shader_create_from_source(.Vertex, batch_vs_source)
-    if !ok {
-        log.fatal("Problem with batch vertex shader")
-        return
-    }
-    batch_fs: Shader
-    batch_fs, ok = shader_create_from_source(.Fragment, batch_fs_source)
-    if !ok {
-        log.fatal("Problem with batch fragment shader")
-        return
-    }
-
-    batch_program: Shader_Program
-    batch_program, ok = shader_program_create(batch_vs, batch_fs)
-    if !ok {
-        log.fatal("Problem with batch shader")
-        return
-    }
-
-    batch: Draw_Batch
-    draw_batch_init(&batch, 1024, 256, batch_program, &window)
-    defer draw_batch_destroy(&batch)
 
     vao: u32
     vbo: u32
@@ -182,38 +169,25 @@ main :: proc() {
     scale := linalg.matrix4_scale_f32({1, 1, 1})
     translate := linalg.matrix4_translate_f32({ 0, 0, -5 })
 
-    camera: Camera
-    camera.fov = fov
-    camera.near = near
-    camera.far = far
+    wireframe := false
+    show_normals := false
+    draw_flat_shader := true
 
-    // window2: Window
-    // if err := init_window(&window2, 800, 600, "Hello from second window"); err != nil {
-    //     log.fatal("Unable to create second window: %v", err)
-    //     return
-    // }
-    // defer destroy_window(&window2)
-    //
-    // triangle := [?]f32 {
-    //      0.0,  0.5,
-    //      0.5, -0.5,
-    //     -0.5, -0.5,
-    // }
-    //
-    // vbo2: u32
-    // vao2: u32
-    // gl.GenBuffers(1, &vbo2)
-    // gl.GenVertexArrays(1, &vao2)
-    //
-    // gl.BindVertexArray(vao2)
-    //
-    // gl.BindBuffer(gl.ARRAY_BUFFER, vbo2)
-    // gl.BufferData(gl.ARRAY_BUFFER, size_of(triangle), raw_data(triangle[:]), gl.STATIC_DRAW)
-    //
-    // gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 2*size_of(triangle[0]), 0)
-    // gl.EnableVertexAttribArray(0)
+    camera: Camera
+    camera.fov = FOV
+    camera.near = NEAR
+    camera.far = FAR
 
     dt: f32
+
+    window2: Window
+    window2_opened := false
+    defer if window2_opened do destroy_window(&window2)
+
+    bounce_p1 := Vector2(10)
+    bounce_vel1 := Vector2{ 5, 5 }
+    bounce_p2 := Vector2(150)
+    bounce_vel2 := Vector2{ 5, -5 }
 
     for !glfw.WindowShouldClose(window.handle) {
         defer free_all(context.temp_allocator)
@@ -230,95 +204,187 @@ main :: proc() {
 
             if is_key_pressed(&window, glfw.KEY_ESCAPE) {
                 glfw.SetWindowShouldClose(window.handle, true)
+                log.info("Close request")
             }
             if is_key_pressed(&window, glfw.KEY_SPACE) {
                 wireframe = !wireframe
-                gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE if wireframe else gl.FILL)
+                log.info("WIREFRAME:", wireframe)
+            }
+
+            if is_key_pressed(&window, glfw.KEY_1) {
+                if err := init_window(&window2, 500, 500, "Hello from secnd window", debug = ODIN_DEBUG); err != nil {
+                    log.fatal("Unable to create second window: %v", err)
+                    return
+                }
+                window2_opened = true
+                make_context(&window)
             }
 
             camera_dir := camera_direction(camera)
 
+            moving_slow := false
+            if is_key_down(&window, glfw.KEY_LEFT_SHIFT) {
+                moving_slow = true
+            }
+
             forward_move_dir := i32(is_key_down(&window, glfw.KEY_W)) - i32(is_key_down(&window, glfw.KEY_S))
             if forward_move_dir != 0 {
-                camera.position += f32(forward_move_dir)*camera_dir*camera_move_speed*dt
+                speed := camera_move_speed * (0.3 if moving_slow else 1)
+                camera.position += f32(forward_move_dir)*camera_dir*speed*dt
             }
             sideways_move_dir := i32(is_key_down(&window, glfw.KEY_A)) - i32(is_key_down(&window, glfw.KEY_D))
             if sideways_move_dir != 0 {
+                speed := camera_move_speed * (0.3 if moving_slow else 1)
                 camera_right := camera_right(camera)
-                camera.position += f32(sideways_move_dir)*camera_right*camera_move_speed*dt
+                camera.position += f32(sideways_move_dir)*camera_right*speed*dt
             }
 
             if is_key_down(&window, glfw.KEY_Q) {
-                up := camera_up(camera)
-                camera.position -= up*camera_move_speed*dt
+                speed := camera_move_speed * (0.3 if moving_slow else 1)
+                camera.position -= global_up*speed*dt
             }
             if is_key_down(&window, glfw.KEY_E) {
-                up := camera_up(camera)
-                camera.position += up*camera_move_speed*dt
+                speed := camera_move_speed * (0.3 if moving_slow else 1)
+                camera.position += global_up*speed*dt
             }
 
             if window.mouse_scroll.y < 0 {
-                camera.fov = clamp(camera.fov - 5, 5, 150)
-            } else if window.mouse_scroll.y > 0 {
                 camera.fov = clamp(camera.fov + 5, 5, 150)
+                log.info("FOV:", camera.fov)
+            } else if window.mouse_scroll.y > 0 {
+                camera.fov = clamp(camera.fov - 5, 5, 150)
+                log.info("FOV:", camera.fov)
+            }
+
+            if is_key_pressed(&window, glfw.KEY_N) {
+                show_normals = !show_normals
+                log.info("SHOW NORMALS:", show_normals)
+            }
+            if is_key_pressed(&window, glfw.KEY_F) {
+                draw_flat_shader = !draw_flat_shader
+                log.info("FLAT SHADING:", draw_flat_shader)
             }
 
             sensitivity :: 0.1
             camera.angles.x += f32(window.mouse_delta.x)*sensitivity
             camera.angles.y = clamp(camera.angles.y + f32(window.mouse_delta.y)*sensitivity, -89, 89)
 
-            gl.ClearColor(f32(0x18)/255, f32(0x18)/255, f32(0x18)/255, 1)
+            gl.ClearColor(f32(BACKGROUND_COLOR.x)/255, f32(BACKGROUND_COLOR.y)/255, f32(BACKGROUND_COLOR.z)/255, 1)
             gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
-            shader_program_use(program)
+            current_program := program_flat if draw_flat_shader else program_smooth
 
-            // perspective := linalg.matrix4_perspective(math.to_radians(camera.fov), f32(window.width)/f32(window.height), near, far)
+            shader_program_use(current_program)
+
             perspective := camera_perspective(camera, window_aspect(&window))
             view := camera_view(camera)
-            rotate := linalg.matrix4_rotate_f32(time_elapsed, { 0, 1, 0 })
+            rotate := linalg.matrix4_rotate_f32(0, { 0, 1, 0 })
             model := translate*rotate*scale
 
-            model_flat := linalg.matrix_flatten(model)
-            view_flat := linalg.matrix_flatten(view)
-            perspective_flat := linalg.matrix_flatten(perspective)
-
-            gl.UniformMatrix4fv(model_uniform, 1, false, raw_data(model_flat[:]))
-            gl.UniformMatrix4fv(view_uniform, 1, false, raw_data(view_flat[:]))
-            gl.UniformMatrix4fv(perspective_uniform, 1, false, raw_data(perspective_flat[:]))
-
-            gl.Uniform1f(time_uniform, time_elapsed)
+            shader_program_default_uniform(current_program, .Time, time_elapsed)
+            shader_program_default_uniform(current_program, .Model, model)
+            shader_program_default_uniform(current_program, .View, view)
+            shader_program_default_uniform(current_program, .Perspective, perspective)
 
             gl.BindVertexArray(vao)
             gl.DrawElements(gl.TRIANGLES, i32(len(indices)*3), gl.UNSIGNED_INT, nil)
 
-            begin_drawing(&batch, &window)
-                begin_camera_3d(&batch, camera)
-                    draw_line_3d(&batch, {0, 0, 0}, {1, 0, 0}, {1, 0, 0})
-                    draw_line_3d(&batch, {0, 0, 0}, {0, 1, 0}, {1, 0, 0})
-                    draw_line_3d(&batch, {1, 0, 0}, {1, 1, 0}, {1, 0, 0})
-                    draw_line_3d(&batch, {0, 1, 0}, {1, 1, 0}, {1, 0, 0})
-                end_camera_3d(&batch)
+            if wireframe {
+                gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
+                shader_program_use(wireframe_program)
 
-                draw_line_2d(&batch, {10, 10}, {f32(window.width)-10, f32(window.height)-10}, {0, 1, 0})
-            end_drawing(&batch)
+                shader_program_default_uniform(wireframe_program, .Model, model)
+                shader_program_default_uniform(wireframe_program, .Perspective, perspective)
+                shader_program_default_uniform(wireframe_program, .View, view)
+
+                gl.DrawElements(gl.TRIANGLES, i32(len(indices)*3), gl.UNSIGNED_INT, nil)
+                gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
+            }
+
+            rect_rot := linalg.matrix4_rotate_f32(-time_elapsed, {0, 1, 0})
+            rect_trans := linalg.matrix4_translate_f32({0, 0, -2})
+            rect_model := rect_trans*rect_rot
+
+            begin_drawing(&window.render_batch, &window)
+                begin_camera_3d(&window.render_batch, &window, camera)
+
+                    if show_normals {
+                        for v in vertices {
+                            draw_line_3d(&window.render_batch, (model*add_one_component(v.position)).xyz, (model*add_one_component(v.position + v.normal/4)).xyz, {0, 0, 1})
+                        }
+                    }
+
+                    draw_line_3d(&window.render_batch, (rect_model*Vector4{-0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5, -0.5, 0, 1}).xyz, {1, 0, 0})
+                    draw_line_3d(&window.render_batch, (rect_model*Vector4{-0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{-0.5,  0.5, 0, 1}).xyz, {1, 0, 0})
+                    draw_line_3d(&window.render_batch, (rect_model*Vector4{ 0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5,  0.5, 0, 1}).xyz, {1, 0, 0})
+                    draw_line_3d(&window.render_batch, (rect_model*Vector4{-0.5,  0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5,  0.5, 0, 1}).xyz, {1, 0, 0})
+
+                    draw_triangle_3d(&window.render_batch,
+                        {-0.5, -0.5, -2},
+                        { 0.5, -0.5, -2},
+                        {-0.5,  0.5, -2},
+                        {0, 0, 1}
+                    )
+
+                    draw_rectangle_3d(&window.render_batch, {-1, 0.5, 2}, {2, 1}, 45, 45, {1, 0, 1})
+                end_camera_3d(&window.render_batch, &window)
+
+            end_drawing(&window.render_batch)
         }
 
-        // {
-        //     start_frame(&window2)
-        //     defer end_frame(&window2)
-        //
-        //     shader_program_use(program)
-        //
-        //     gl.BindVertexArray(vao)
-        //     gl.DrawArrays(gl.TRIANGLES, 0, len(triangle))
-        // }
+        if window2_opened {
+            defer if glfw.WindowShouldClose(window2.handle) {
+                window2_opened = false
+                destroy_window(&window2)
+            }
+
+            start_frame(&window2)
+            defer end_frame(&window2)
+
+            new_bounce_p1 := bounce_p1 + bounce_vel1
+            if new_bounce_p1.x <= 0 || new_bounce_p1.x >= f32(window2.width) {
+                new_bounce_p1.x = clamp(new_bounce_p1.x, 0, f32(window2.width))
+                bounce_vel1.x = -bounce_vel1.x
+            }
+            if new_bounce_p1.y <= 0 || new_bounce_p1.y >= f32(window2.height) {
+                new_bounce_p1.y = clamp(new_bounce_p1.y, 0, f32(window2.height))
+                bounce_vel1.y = -bounce_vel1.y
+            }
+            new_bounce_p2 := bounce_p2 + bounce_vel2
+            if new_bounce_p2.x <= 0 || new_bounce_p2.x >= f32(window2.width) {
+                new_bounce_p2.x = clamp(new_bounce_p2.x, 0, f32(window2.width))
+                bounce_vel2.x = -bounce_vel2.x
+            }
+            if new_bounce_p2.y <= 0 || new_bounce_p2.y >= f32(window2.height) {
+                new_bounce_p2.y = clamp(new_bounce_p2.y, 0, f32(window2.height))
+                bounce_vel2.y = -bounce_vel2.y
+            }
+
+            bounce_p1 = new_bounce_p1
+            bounce_p2 = new_bounce_p2
+
+            gl.ClearColor(f32(0x18)/255, f32(0x18)/255, f32(0x18)/255, 1)
+            gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+
+            begin_drawing(&window2.render_batch, &window2)
+            draw_line_2d(&window2.render_batch, bounce_p1, bounce_p2, {0, 1, 0})
+
+            draw_triangle_2d(&window2.render_batch,
+                {100, 100},
+                {200, 100},
+                {100, 200},
+                {0, 0, 1}
+            )
+
+            draw_rectangle_2d(&window2.render_batch, vector_cast(f32, window2.mouse_pos), {10, 10}, {1, 1, 0})
+            end_drawing(&window2.render_batch)
+        }
 
     }
 }
 
 import gl "vendor:OpenGL"
 import "vendor:glfw"
-import "core:math"
 import "core:math/linalg"
 import "core:time"
 import "core:log"

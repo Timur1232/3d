@@ -25,3 +25,34 @@ to_csrt_temp :: proc(str: string) -> cstring {
     buf[len(str)] = 0
     return cstring(raw_data(buf[:]))
 }
+
+add_one_component :: proc(v: $T/[$N]$E) -> [N+1]E
+    where intrinsics.type_is_numeric(E) {
+    vo: [N+1]E
+    for i in 0..<N {
+        vo[i] = v[i]
+    }
+    vo[N] = 1
+    return vo
+}
+
+vector_cast :: proc($C: typeid, v: $T/[$N]$E) -> [N]C
+    where intrinsics.type_is_numeric(C) {
+    vo: [N]C
+    for i in 0..<N {
+        vo[i] = cast(C)v[i]
+    }
+    return vo
+}
+
+assert_opengl :: #force_inline proc(message := "OpenGL must be loaded", loc := #caller_location) {
+    assert(gl.impl_GenBuffers != nil, message, loc)
+}
+
+assert_current_context :: #force_inline proc(message := "Current context must be set", loc := #caller_location) {
+    w := get_current_window()
+    assert(w != nil, message, loc)
+}
+
+import "base:intrinsics"
+import gl "vendor:OpenGL"

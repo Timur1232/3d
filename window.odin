@@ -20,17 +20,23 @@ Window :: struct {
     mouse_delta: Vector2_f64,
     mouse_scroll: Vector2_f64,
 
+    render_batch: Render_Batch,
+
     is_current_context: bool,
 }
 
 Create_Window_Error_Enum :: enum {
     None,
-    Unable_To_Create,
+    Create_Window_Err,
+    Init_Render_Batch_Err,
 }
 Create_Window_Error :: union #shared_nil {
     Create_Window_Error_Enum,
     runtime.Allocator_Error,
 }
+
+DEFAULT_RENDER_BATCH_VERTEX_CAPACITY :: 1024*4
+DEFAULT_RENDER_BATCH_DRAWS_CAPACITY  :: 256
 
 // Automaticaly make created window as current context
 init_window :: proc(window: ^Window, width, height: i32, title: string, debug := false) -> (err: Create_Window_Error) {
@@ -39,14 +45,14 @@ init_window :: proc(window: ^Window, width, height: i32, title: string, debug :=
         log.error("Unable to create window: %v", err)
     }
 
-    glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, gl_version_major)
-    glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, gl_version_minor)
+    glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, GL_VERSION_MAJOR)
+    glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, GL_VERSION_MINOR)
     glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
     glfw.WindowHint(glfw.OPENGL_DEBUG_CONTEXT, true)
 
     window_handle := glfw.CreateWindow(width, height, to_csrt_temp(title), nil, nil)
     if window_handle == nil {
-        err = Create_Window_Error_Enum.Unable_To_Create
+        err = Create_Window_Error_Enum.Create_Window_Err
         return
     }
     window.handle = window_handle
@@ -63,7 +69,8 @@ init_window :: proc(window: ^Window, width, height: i32, title: string, debug :=
 
     glfw.SwapInterval(1)
 
-    gl.load_up_to(gl_version_major, gl_version_minor, glfw.gl_set_proc_address)
+
+    gl.load_up_to(GL_VERSION_MAJOR, GL_VERSION_MINOR, glfw.gl_set_proc_address)
     gl.Viewport(0, 0, width, height)
 
     glfw.SetFramebufferSizeCallback(window_handle, proc "c" (window: glfw.WindowHandle, width, height: i32) {
@@ -95,7 +102,14 @@ init_window :: proc(window: ^Window, width, height: i32, title: string, debug :=
         log.info("Debug output is enabled")
     }
 
-    gl.Enable(gl.DEPTH_TEST);
+    gl.Enable(gl.DEPTH_TEST)
+    // gl.Enable(gl.CULL_FACE)
+
+    if ok := render_batch_init(&window.render_batch, DEFAULT_RENDER_BATCH_VERTEX_CAPACITY, DEFAULT_RENDER_BATCH_DRAWS_CAPACITY); !ok {
+        log.error("Unable to initialize render batch")
+        err = Create_Window_Error_Enum.Init_Render_Batch_Err
+        return
+    }
 
     log.infof("Window created\n    TITLE: %s\n    WIDTH: %v\n    HIEGHT: %v", title, width, height)
 
@@ -108,6 +122,9 @@ destroy_window :: proc(w: ^Window) {
     if w.mouse_buttons != nil do delete(w.mouse_buttons)
     glfw.DestroyWindow(w.handle)
     clear_context()
+    render_batch_destroy(&w.render_batch)
+
+    log.infof("Window (title: \"%s\") closed", w.title)
 }
 
 get_current_window :: #force_inline proc "contextless" () -> ^Window {
@@ -148,7 +165,7 @@ clear_context :: proc "contextless" () {
     glfw.MakeContextCurrent(nil)
 }
 
-start_frame :: proc(w: ^Window) {
+start_frame :: #force_inline proc(w: ^Window) {
     make_context(w)
 }
 
@@ -160,9 +177,18 @@ end_frame :: proc(w: ^Window) {
     // Swapping must be before polling events, because there is strange bug that would segfault on terminating glfw, presumably due to wayland generating some events on swap buffers, that need handaling.
     glfw.SwapBuffers(w.handle)
 
+    w.mouse_scroll = 0
     glfw.PollEvents()
 
     w.mouse_delta = w.mouse_pos - w.prev_mouse_pos
+}
+
+start_3d :: proc(w: ^Window, camera: Camera) {
+    begin_camera_3d(&w.render_batch, w, camera)
+}
+
+end_3d :: proc(w: ^Window) {
+    end_camera_3d(&w.render_batch, w)
 }
 
 window_aspect :: #force_inline proc(w: ^Window) -> f32 {
@@ -251,10 +277,16 @@ mouse_scroll_callback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: 
     w.mouse_scroll.y = yoffset
 }
 
+// ===============================[Other]=============================== //
 
+window_ortho :: #force_inline proc(window: ^Window) -> Mat4 {
+    return linalg.matrix_ortho3d_f32(0, f32(window.width), f32(window.height), 0, 0, math.F32_MAX)
+}
 
 import "vendor:glfw"
 import gl "vendor:OpenGL"
 import "base:runtime"
 import "core:c/libc"
 import "core:log"
+import "core:math"
+import "core:math/linalg"
