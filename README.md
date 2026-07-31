@@ -6,6 +6,7 @@ This is some 3d stuff with OpenGL for learning.
 
 - Left Mouse Button - toggle capturing cursor (for looking around)
 - Mouse - look around
+- Scroll Wheel - change fov
 - WASD - moving
 - Left Shift (hold) - slow moving speed
 - Q/E - move down/up
