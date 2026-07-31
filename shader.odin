@@ -1,17 +1,12 @@
 package main
 
 Shader_Type :: enum u32 {
-    None     = 0,
     Vertex   = gl.VERTEX_SHADER,
     Fragment = gl.FRAGMENT_SHADER,
-    Compute  = gl.COMPUTE_SHADER, // Not supported for now
+    Compute  = gl.COMPUTE_SHADER,
 }
 
-Shader :: struct {
-    id: u32,
-    type: Shader_Type,
-}
-
+// Uniforms found by default
 Default_Uniform_Type :: enum int {
     Time = 0,
     Light_Pos,
@@ -35,7 +30,8 @@ Default_Uniform_Types :: [Default_Uniform_Type]typeid {
     .Perspective = Mat4,
 }
 
-Shader_Program :: struct {
+// Abstraction over shader program
+Shader :: struct {
     id: u32,
     locs: Default_Uniform_Indices,
 }
@@ -45,36 +41,31 @@ shader_valid :: #force_inline proc(shader: Shader) -> bool {
     return shader.id != 0
 }
 
-shader_create_from_source :: proc(type: Shader_Type, source_code: string, loc := #caller_location) -> (shader: Shader, ok: bool) {
-    assert(type != .None)
-
-    if type == .Compute {
-        log.warn("Compute shaders are not supported through current API for now. Use native gl function to create program.")
-    }
-
-    shader.id = gl.CreateShader(u32(type))
-    if !shader_valid(shader) {
+shader_compile_from_source :: proc(type: Shader_Type, source_code: []u8, loc := #caller_location) -> (shader_id: u32, ok: bool) {
+    shader_id = gl.CreateShader(u32(type))
+    if shader_id == 0 {
         log.errorf("Unable to create %v shader", type, location = loc)
         ok = false
         return
     }
-    shader.type = type
 
     defer if !ok {
-        shader_delete(shader)
-        shader.id = 0
+        gl.DeleteShader(shader_id)
+        shader_id = 0
     }
 
-    cstr := to_csrt_temp(source_code)
-    gl.ShaderSource(shader.id, 1, &cstr, nil)
-    gl.CompileShader(shader.id)
+    source_code := source_code
+    cstr := cstring(raw_data(source_code))
+    length := []i32{ i32(len(source_code)) }
+    gl.ShaderSource(shader_id, 1, &cstr, raw_data(length))
+    gl.CompileShader(shader_id)
 
     success: i32
-    gl.GetShaderiv(shader.id, gl.COMPILE_STATUS, &success)
+    gl.GetShaderiv(shader_id, gl.COMPILE_STATUS, &success)
 
     if success == 0 {
         @(static) info_log: [512]u8
-        gl.GetShaderInfoLog(shader.id, 512, nil, raw_data(info_log[:]))
+        gl.GetShaderInfoLog(shader_id, 512, nil, raw_data(info_log[:]))
         log.errorf("Unable to compile shader: %s", string(info_log[:]), location = loc)
         ok = false
         return
@@ -84,37 +75,28 @@ shader_create_from_source :: proc(type: Shader_Type, source_code: string, loc :=
     return
 }
 
-// NOTE: Deleting shader doesn't make it invalid
-shader_delete :: #force_inline proc(shader: Shader) {
-    gl.DeleteShader(shader.id)
-}
-
 // NOTE: Deleting shader program doesn't make it invalid
-shader_program_valid :: #force_inline proc(program: Shader_Program) -> bool {
-    return program.id != 0
+shader_delete :: #force_inline proc(shader: Shader) {
+    gl.DeleteProgram(shader.id)
 }
 
-shader_program_create :: proc(vertex_shader, fragment_shader: Shader, loc := #caller_location) -> (program: Shader_Program, ok: bool) {
-    assert(shader_valid(vertex_shader) && shader_valid(fragment_shader))
-
-    if vertex_shader.type == .Compute || fragment_shader.type == .Compute {
-        log.warn("Compute shaders are not supported through current API for now. Use native gl function to create program.")
-    }
-
+shader_link :: proc(shader_ids: ..u32, loc := #caller_location) -> (program: Shader, ok: bool) {
     program.id = gl.CreateProgram()
-    if !shader_program_valid(program) {
+    if !shader_valid(program) {
         log.error("Unable to create shader program", location = loc)
         ok = false
         return
     }
 
     defer if !ok {
-        shader_program_delete(program)
+        shader_delete(program)
         program.id = 0
     }
 
-    gl.AttachShader(program.id, vertex_shader.id)
-    gl.AttachShader(program.id, fragment_shader.id)
+    for id in shader_ids {
+        assert(id != 0, "Shader must be valid", loc = loc)
+        gl.AttachShader(program.id, id)
+    }
 
     gl.LinkProgram(program.id)
 
@@ -137,16 +119,15 @@ shader_program_create :: proc(vertex_shader, fragment_shader: Shader, loc := #ca
     return
 }
 
-// NOTE: Deleting shader program doesn't make it invalid
-shader_program_delete :: #force_inline proc(program: Shader_Program) {
-    gl.DeleteProgram(program.id)
-}
-
-shader_program_use :: #force_inline proc(program: Shader_Program) {
+shader_use :: #force_inline proc(program: Shader) {
     gl.UseProgram(program.id)
 }
 
-shader_program_default_uniform :: proc(program: Shader_Program, $type: Default_Uniform_Type, data: Default_Uniform_Types[type]) {
+shader_uniform_location :: #force_inline proc(program: Shader, name: cstring) -> i32 {
+    return gl.GetUniformLocation(program.id, name)
+}
+
+shader_default_uniform :: proc(program: Shader, $type: Default_Uniform_Type, data: Default_Uniform_Types[type]) {
     if program.locs[type] < 0 do return
     when type == .Time {
         gl.ProgramUniform1f(program.id, program.locs[type], data)
@@ -159,16 +140,16 @@ shader_program_default_uniform :: proc(program: Shader_Program, $type: Default_U
     }
 }
 
-shader_program_create_from_source :: proc(vs_source, fs_source: string) -> (program: Shader_Program, ok: bool) {
-    vertex_shader := shader_create_from_source(.Vertex, vs_source) or_return
-    fragment_shader := shader_create_from_source(.Fragment, fs_source) or_return
-    program = shader_program_create(vertex_shader, fragment_shader) or_return
-    shader_delete(vertex_shader)
-    shader_delete(fragment_shader)
+shader_create_from_source :: proc(vs_source, fs_source: []u8) -> (program: Shader, ok: bool) {
+    vertex_shader := shader_compile_from_source(.Vertex, vs_source) or_return
+    fragment_shader := shader_compile_from_source(.Fragment, fs_source) or_return
+    program = shader_link(vertex_shader, fragment_shader) or_return
+    gl.DeleteShader(vertex_shader)
+    gl.DeleteShader(fragment_shader)
     return program, true
 }
 
-shader_program_create_from_path :: proc(vs_path, fs_path: string, allocator := context.temp_allocator) -> (program: Shader_Program, ok: bool) {
+shader_create_from_path :: proc(vs_path, fs_path: string, allocator := context.temp_allocator) -> (program: Shader, ok: bool) {
     vs_source, file_err := os.read_entire_file(vs_path, allocator)
     if file_err != nil {
         log.errorf("Unable to read %s: %v", vs_path, file_err)
@@ -182,7 +163,7 @@ shader_program_create_from_path :: proc(vs_path, fs_path: string, allocator := c
         ok = false
         return
     }
-    return shader_program_create_from_source(string(vs_source), string(fs_source))
+    return shader_create_from_source(vs_source, fs_source)
 }
 
 import gl "vendor:OpenGL"

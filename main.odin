@@ -12,16 +12,16 @@ MODEL_PATH :: MODELS_DIR+"monkey.obj"
 model_data := #load(MODEL_PATH)
 
 @(private="file")
-vs_source := string(#load(SHADERS_DIR+"vs.glsl"))
+vs_source := #load(SHADERS_DIR+"vs.glsl")
 @(private="file")
-flat_fs_source := string(#load(SHADERS_DIR+"flat_fs.glsl"))
+flat_fs_source := #load(SHADERS_DIR+"flat_fs.glsl")
 @(private="file")
-smooth_fs_source := string(#load(SHADERS_DIR+"smooth_fs.glsl"))
+smooth_fs_source := #load(SHADERS_DIR+"smooth_fs.glsl")
 
 @(private="file")
-wireframe_vs_source := string(#load(SHADERS_DIR+"wireframe_vs.glsl"))
+wireframe_vs_source := #load(SHADERS_DIR+"wireframe_vs.glsl")
 @(private="file")
-wireframe_fs_source := string(#load(SHADERS_DIR+"wireframe_fs.glsl"))
+wireframe_fs_source := #load(SHADERS_DIR+"wireframe_fs.glsl")
 
 FOV  : f32 : 60
 NEAR :: 0.1
@@ -29,7 +29,7 @@ FAR  :: 100
 
 LOWEST_LOG_LEVEL : log.Level : .Debug when ODIN_DEBUG else .Info
 
-BACKGROUND_COLOR :: Color{ 0xCC, 0xCC, 0xCC }
+BACKGROUND_COLOR :: Color{ 0x10, 0x10, 0x10, 0xFF }
 
 main :: proc() {
     logger := log.create_console_logger(lowest = LOWEST_LOG_LEVEL, opt = {
@@ -69,36 +69,36 @@ main :: proc() {
     defer destroy_window(&window)
 
     ok: bool
-    program_flat: Shader_Program
-    program_flat, ok = shader_program_create_from_source(vs_source, flat_fs_source)
+    shader_flat: Shader
+    shader_flat, ok = shader_create_from_source(vs_source, flat_fs_source)
     if !ok {
         log.fatal("Problem with shader program")
         return
     }
-    defer shader_program_delete(program_flat)
+    defer shader_delete(shader_flat)
 
     light_pos := linalg.normalize(Vector3{ 1, 2, 2.5 })
-    shader_program_default_uniform(program_flat, .Light_Pos, light_pos)
+    shader_default_uniform(shader_flat, .Light_Pos, light_pos)
 
-    program_smooth: Shader_Program
-    program_smooth, ok = shader_program_create_from_source(vs_source, smooth_fs_source)
+    shader_smooth: Shader
+    shader_smooth, ok = shader_create_from_source(vs_source, smooth_fs_source)
     if !ok {
         log.fatal("Problem with shader program")
         return
     }
-    defer shader_program_delete(program_smooth)
+    defer shader_delete(shader_smooth)
 
-    shader_program_default_uniform(program_smooth, .Light_Pos, light_pos)
+    shader_default_uniform(shader_smooth, .Light_Pos, light_pos)
 
-    wireframe_program: Shader_Program
-    wireframe_program, ok = shader_program_create_from_source(wireframe_vs_source, wireframe_fs_source)
+    shader_wireframe: Shader
+    shader_wireframe, ok = shader_create_from_source(wireframe_vs_source, wireframe_fs_source)
     if !ok {
         log.error("Problem with wireframe shader program")
     }
-    defer shader_program_delete(wireframe_program)
+    defer shader_delete(shader_wireframe)
 
-    wireframe_color_uniform := gl.GetUniformLocation(wireframe_program.id, "u_wireframe_color")
-    gl.ProgramUniform3f(wireframe_program.id, wireframe_color_uniform, 0, 0, 0)
+    wireframe_color_uniform := gl.GetUniformLocation(shader_wireframe.id, "u_wireframe_color")
+    gl.ProgramUniform3f(shader_wireframe.id, wireframe_color_uniform, 0, 0, 0)
 
     scene: tinyobj.Scene
     tinyobj_cfg := tinyobj.default_config()
@@ -159,7 +159,7 @@ main :: proc() {
     gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
     gl.BufferData(gl.ARRAY_BUFFER, slice.size(vertices), raw_data(vertices), gl.STATIC_DRAW)
 
-    set_vertex_vao()
+    set_vertex_attributes(Vertex)
 
     time_elapsed: f32 = 0
     start_time: time.Time
@@ -181,8 +181,7 @@ main :: proc() {
     dt: f32
 
     window2: Window
-    window2_opened := false
-    defer if window2_opened do destroy_window(&window2)
+    defer if window_valid(&window2) do destroy_window(&window2)
 
     bounce_p1 := Vector2(10)
     bounce_vel1 := Vector2{ 5, 5 }
@@ -202,6 +201,7 @@ main :: proc() {
             time_elapsed += dt
         }
 
+        // Main window
         {
             start_frame(&window)
             defer end_frame(&window)
@@ -220,7 +220,6 @@ main :: proc() {
                     log.fatal("Unable to create second window: %v", err)
                     return
                 }
-                window2_opened = true
                 make_context(&window)
             }
 
@@ -285,33 +284,32 @@ main :: proc() {
                 camera.angles.y = clamp(camera.angles.y + f32(window.mouse_delta.y)*sensitivity, -89, 89)
             }
 
-            gl.ClearColor(f32(BACKGROUND_COLOR.x)/255, f32(BACKGROUND_COLOR.y)/255, f32(BACKGROUND_COLOR.z)/255, 1)
-            gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+            clear_color(&window, BACKGROUND_COLOR)
 
-            current_program := program_flat if draw_flat_shader else program_smooth
+            current_shader := shader_flat if draw_flat_shader else shader_smooth
 
-            shader_program_use(current_program)
+            shader_use(current_shader)
 
             perspective := camera_perspective(camera, window_aspect(&window))
             view := camera_view(camera)
             rotate := linalg.matrix4_rotate_f32(0, { 0, 1, 0 })
             model := translate*rotate*scale
 
-            shader_program_default_uniform(current_program, .Time, time_elapsed)
-            shader_program_default_uniform(current_program, .Model, model)
-            shader_program_default_uniform(current_program, .View, view)
-            shader_program_default_uniform(current_program, .Perspective, perspective)
+            shader_default_uniform(current_shader, .Time, time_elapsed)
+            shader_default_uniform(current_shader, .Model, model)
+            shader_default_uniform(current_shader, .View, view)
+            shader_default_uniform(current_shader, .Perspective, perspective)
 
             gl.BindVertexArray(vao)
             gl.DrawElements(gl.TRIANGLES, i32(len(indices)*3), gl.UNSIGNED_INT, nil)
 
             if wireframe {
                 gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
-                shader_program_use(wireframe_program)
+                shader_use(shader_wireframe)
 
-                shader_program_default_uniform(wireframe_program, .Model, model)
-                shader_program_default_uniform(wireframe_program, .Perspective, perspective)
-                shader_program_default_uniform(wireframe_program, .View, view)
+                shader_default_uniform(shader_wireframe, .Model, model)
+                shader_default_uniform(shader_wireframe, .Perspective, perspective)
+                shader_default_uniform(shader_wireframe, .View, view)
 
                 gl.DrawElements(gl.TRIANGLES, i32(len(indices)*3), gl.UNSIGNED_INT, nil)
                 gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
@@ -321,47 +319,45 @@ main :: proc() {
             rect_trans := linalg.matrix4_translate_f32({0, 0, -2})
             rect_model := rect_trans*rect_rot
 
-            begin_drawing(&window.render_batch, &window)
-                begin_camera_3d(&window.render_batch, &window, camera)
+            begin_camera_3d(&window, camera)
 
-                    if show_normals {
-                        for v in vertices {
-                            draw_line_3d(&window.render_batch, (model*add_one_component(v.position)).xyz, (model*add_one_component(v.position + v.normal/4)).xyz, {0, 0, 1})
-                        }
+                if show_normals {
+                    for v in vertices {
+                        draw_line_3d(&window, (model*add_one_component(v.position)).xyz, (model*add_one_component(v.position + v.normal/4)).xyz, {0, 0, 255, 0xFF})
                     }
-
-                    draw_line_3d(&window.render_batch, (rect_model*Vector4{-0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5, -0.5, 0, 1}).xyz, {1, 0, 0})
-                    draw_line_3d(&window.render_batch, (rect_model*Vector4{-0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{-0.5,  0.5, 0, 1}).xyz, {1, 0, 0})
-                    draw_line_3d(&window.render_batch, (rect_model*Vector4{ 0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5,  0.5, 0, 1}).xyz, {1, 0, 0})
-                    draw_line_3d(&window.render_batch, (rect_model*Vector4{-0.5,  0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5,  0.5, 0, 1}).xyz, {1, 0, 0})
-
-                    draw_triangle_3d(&window.render_batch,
-                        {-0.5, -0.5, -2},
-                        { 0.5, -0.5, -2},
-                        {-0.5,  0.5, -2},
-                        {0, 0, 1}
-                    )
-
-                    draw_rectangle_3d(&window.render_batch, {-1, 0.5, 2}, {2, 1}, 45, 45, {1, 0, 1})
-                end_camera_3d(&window.render_batch, &window)
-
-                if !capture_cursor {
-                    mouse_pos := vector_cast(f32, window.mouse_pos)
-                    draw_triangle_2d(
-                        &window.render_batch,
-                        mouse_pos,
-                        mouse_pos + {20, 0},
-                        mouse_pos + {0, 20},
-                        {1, 1, 0}
-                    )
-                    draw_line_2d(&window.render_batch, mouse_pos, mouse_pos + vector_cast(f32, window.mouse_delta), {0, 0, 1})
                 }
-            end_drawing(&window.render_batch)
+
+                draw_line_3d(&window, (rect_model*Vector4{-0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5, -0.5, 0, 1}).xyz, {255, 0, 0, 0xFF})
+                draw_line_3d(&window, (rect_model*Vector4{-0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{-0.5,  0.5, 0, 1}).xyz, {255, 0, 0, 0xFF})
+                draw_line_3d(&window, (rect_model*Vector4{ 0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5,  0.5, 0, 1}).xyz, {255, 0, 0, 0xFF})
+                draw_line_3d(&window, (rect_model*Vector4{-0.5,  0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5,  0.5, 0, 1}).xyz, {255, 0, 0, 0xFF})
+
+                draw_triangle_3d(&window,
+                    {-0.5, -0.5, -2},
+                    { 0.5, -0.5, -2},
+                    {-0.5,  0.5, -2},
+                    {0, 0, 255, 0xFF}
+                )
+
+                draw_rectangle_3d(&window, {-1, 0.5, 2}, {2, 1}, 45, 45, {255, 0, 255, 0xFF})
+            end_camera_3d(&window)
+
+            if !capture_cursor {
+                mouse_pos := vector_cast(f32, window.mouse_pos)
+                draw_triangle_2d(
+                    &window,
+                    mouse_pos,
+                    mouse_pos + {20, 0},
+                    mouse_pos + {0, 20},
+                    {255, 255, 0, 0xFF}
+                )
+                draw_line_2d(&window, mouse_pos, mouse_pos + vector_cast(f32, window.mouse_delta), {0, 0, 255, 0xFF})
+            }
         }
 
-        if window2_opened {
+        // Second window
+        if window_valid(&window2) {
             defer if glfw.WindowShouldClose(window2.handle) {
-                window2_opened = false
                 destroy_window(&window2)
             }
 
@@ -390,24 +386,21 @@ main :: proc() {
             bounce_p1 = new_bounce_p1
             bounce_p2 = new_bounce_p2
 
-            gl.ClearColor(f32(0x18)/255, f32(0x18)/255, f32(0x18)/255, 1)
-            gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+            clear_color(&window2, BACKGROUND_COLOR)
 
-            begin_drawing(&window2.render_batch, &window2)
-                draw_line_2d(&window2.render_batch, bounce_p1, bounce_p2, {0, 1, 0})
+            draw_line_2d(&window2, bounce_p1, bounce_p2, {0, 255, 0, 0xFF})
 
-                triangle_rot := linalg.matrix2_rotate(time_elapsed)
-                triangle_pos := Vector2{300, 300}
+            triangle_rot := linalg.matrix2_rotate(time_elapsed)
+            triangle_pos := Vector2{300, 300}
 
-                draw_triangle_2d(&window2.render_batch,
-                    triangle_rot * Vector2{0,   0} + triangle_pos,
-                    triangle_rot * Vector2{100, 0} + triangle_pos,
-                    triangle_rot * Vector2{0, 100} + triangle_pos,
-                    {0, 0, 1}
-                )
+            draw_triangle_2d(&window2,
+                triangle_rot * Vector2{0,   0} + triangle_pos,
+                triangle_rot * Vector2{100, 0} + triangle_pos,
+                triangle_rot * Vector2{0, 100} + triangle_pos,
+                {0, 0, 255, 0xFF}
+            )
 
-                draw_rectangle_2d(&window2.render_batch, vector_cast(f32, window2.mouse_pos), {10, 10}, {1, 1, 0})
-            end_drawing(&window2.render_batch)
+            draw_rectangle_2d(&window2, vector_cast(f32, window2.mouse_pos), {10, 10}, {255, 255, 0, 0xFF})
         }
     }
 }
@@ -419,4 +412,3 @@ import "core:time"
 import "core:log"
 import "tinyobj"
 import "core:slice"
-import "core:fmt"

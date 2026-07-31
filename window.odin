@@ -103,7 +103,7 @@ init_window :: proc(window: ^Window, width, height: i32, title: string, debug :=
     }
 
     gl.Enable(gl.DEPTH_TEST)
-    // gl.Enable(gl.CULL_FACE)
+    gl.Enable(gl.CULL_FACE)
 
     if ok := render_batch_init(&window.render_batch, DEFAULT_RENDER_BATCH_VERTEX_CAPACITY, DEFAULT_RENDER_BATCH_DRAWS_CAPACITY); !ok {
         log.error("Unable to initialize render batch")
@@ -160,7 +160,6 @@ make_context :: proc "contextless" (w: ^Window) -> ^Window {
     w.is_current_context = true
     return current_window
 }
-
 clear_context :: proc "contextless" () {
     current_window := get_current_window()
     if current_window != nil {
@@ -171,9 +170,12 @@ clear_context :: proc "contextless" () {
 
 start_frame :: #force_inline proc(w: ^Window) {
     make_context(w)
+    begin_drawing(w)
 }
 
 end_frame :: proc(w: ^Window) {
+    end_drawing(w)
+
     // Frames increment must be before polling events, so logic for saving frames for key presses would work.
     w.frames_count += 1
     w.prev_mouse_pos = w.mouse_pos
@@ -183,14 +185,6 @@ end_frame :: proc(w: ^Window) {
 
     w.mouse_scroll = 0
     w.mouse_delta = 0
-}
-
-start_3d :: proc(w: ^Window, camera: Camera) {
-    begin_camera_3d(&w.render_batch, w, camera)
-}
-
-end_3d :: proc(w: ^Window) {
-    end_camera_3d(&w.render_batch, w)
 }
 
 window_aspect :: #force_inline proc(w: ^Window) -> f32 {
@@ -284,8 +278,19 @@ mouse_cursor_enter_callback :: proc "c" (window: glfw.WindowHandle, entered: i32
 
 // ===============================[Other]=============================== //
 
+// Orthogonal view matrix of the window for 2D rendering (makes 1 unit = 1 pixel)
 window_ortho :: #force_inline proc(window: ^Window) -> Mat4 {
     return linalg.matrix_ortho3d_f32(0, f32(window.width), f32(window.height), 0, 0, math.F32_MAX)
+}
+
+window_valid :: #force_inline proc(w: ^Window) -> bool {
+    return w.handle != nil
+}
+
+clear_color :: #force_inline proc(w: ^Window, color: Color) {
+    color_norm := normalize_color(color)
+    gl.ClearColor(color_norm.r, color_norm.g, color_norm.b, color_norm.a)
+    gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 }
 
 import "vendor:glfw"

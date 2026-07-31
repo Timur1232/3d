@@ -49,9 +49,22 @@ assert_opengl :: #force_inline proc(message := "OpenGL must be loaded", loc := #
     assert(gl.impl_GenBuffers != nil, message, loc)
 }
 
-assert_current_context :: #force_inline proc(message := "Current context must be set", loc := #caller_location) {
+assert_context_global :: #force_inline proc(message := "Current context must be set", loc := #caller_location) {
     w := get_current_window()
     assert(w != nil, message, loc)
+}
+
+assert_context_window :: #force_inline proc(window: ^Window, message := "Current context must be set", loc := #caller_location) {
+    assert(window.is_current_context, message, loc)
+}
+
+assert_current_context :: proc{
+    assert_context_global,
+    assert_context_window,
+}
+
+normalize_color :: #force_inline proc(color: Color) -> Vector4 {
+    return vector_cast(f32, color)/255
 }
 
 import "base:intrinsics"
