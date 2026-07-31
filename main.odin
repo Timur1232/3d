@@ -216,7 +216,7 @@ main :: proc() {
             }
 
             if is_key_pressed(&window, glfw.KEY_1) {
-                if err := init_window(&window2, 500, 500, "Hello from secnd window", debug = ODIN_DEBUG); err != nil {
+                if err := init_window(&window2, 500, 500, "Hello from second window", debug = ODIN_DEBUG); err != nil {
                     log.fatal("Unable to create second window: %v", err)
                     return
                 }
