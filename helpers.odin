@@ -1,6 +1,6 @@
 package main
 
-TEMP_STRING_BUFFER_SIZE :: #config(TEMP_STRING_BUFFER_SIZE, 1024*4)
+TEMP_STRING_BUFFER_SIZE   :: #config(TEMP_STRING_BUFFER_SIZE, 1024*4)
 TEMP_STRING_BUFFER_STATIC :: #config(TEMP_STRING_BUFFER_STATIC, true)
 
 to_csrt_temp :: proc(str: string) -> cstring {
@@ -45,26 +45,8 @@ vector_cast :: proc($C: typeid, v: $T/[$N]$E) -> [N]C
     return vo
 }
 
-assert_opengl :: #force_inline proc(message := "OpenGL must be loaded", loc := #caller_location) {
-    assert(gl.impl_GenBuffers != nil, message, loc)
-}
-
-assert_context_global :: #force_inline proc(message := "Current context must be set", loc := #caller_location) {
-    w := get_current_window()
-    assert(w != nil, message, loc)
-}
-
-assert_context_window :: #force_inline proc(window: ^Window, message := "Current context must be set", loc := #caller_location) {
-    assert(window.is_current_context, message, loc)
-}
-
-assert_current_context :: proc{
-    assert_context_global,
-    assert_context_window,
-}
-
-normalize_color :: #force_inline proc(color: Color) -> Vector4 {
-    return vector_cast(f32, color)/255
+assert_opengl :: #force_inline proc "contextless" (message := "OpenGL must be loaded", loc := #caller_location) {
+    assert_contextless(gl.impl_GenBuffers != nil, message, loc)
 }
 
 import "base:intrinsics"

@@ -4,17 +4,20 @@ Vertex :: struct {
     position: Vector3,
     normal: Vector3,
     color: Vector4,
+    uv: Vector2,
 }
 
 Draw_Mode :: enum {
+    None,
     Line,
     Triangle,
-    Quad,
+    Triangle_Strip,
 }
 GL_Draw_Modes := [Draw_Mode]u32 {
-    .Line = gl.LINES,
-    .Triangle = gl.TRIANGLES,
-    .Quad = gl.TRIANGLE_STRIP,
+    .None           = 0,
+    .Line           = gl.LINES,
+    .Triangle       = gl.TRIANGLES,
+    .Triangle_Strip = gl.TRIANGLE_STRIP,
 }
 Draw_Opt :: enum {
     Depth_Test,
@@ -22,7 +25,7 @@ Draw_Opt :: enum {
 }
 Draw_Opts :: bit_set[Draw_Opt]
 GL_Draw_Opt := [Draw_Opt]u32 {
-    .Depth_Test = gl.DEPTH_TEST,
+    .Depth_Test       = gl.DEPTH_TEST,
     .Backface_Culling = gl.CULL_FACE,
 }
 
@@ -35,16 +38,16 @@ Draw_Request :: struct {
 
 Render_Batch :: struct {
     vertices: []Vertex,
-    draws: []Draw_Request,
-
     vertices_count: int,
-    draws_count: int,
 
-    shader_primitives: Shader,
-    transform_uniform: i32,
+    draws: []Draw_Request,
+    draws_count: int,
 
     current_transform: Mat4,
     draw_opts: Draw_Opts,
+
+    shader_primitives: Shader,
+    transform_uniform: i32,
 
     vao: u32,
     vbo: u32,
@@ -60,58 +63,54 @@ batch_vs_source := #load(PRIMITIVE_VERTEX_SHADER_PATH)
 batch_fs_source := #load(PRIMITIVE_FRAGMENT_SHADER_PATH)
 
 // NOTE: Must be called after making window context and loading OpenGL functions
-render_batch_init :: proc(batch: ^Render_Batch, vertex_count, draw_count: int) -> (ok: bool){
+render_batch_init :: proc(rb: ^Render_Batch, vertex_count, draw_count: int) -> (ok: bool){
     assert_current_context()
     assert_opengl()
 
     alloc_err: runtime.Allocator_Error
-    batch.vertices, alloc_err = make([]Vertex, vertex_count)
+    rb.vertices, alloc_err = make([]Vertex, vertex_count)
     assert(alloc_err == .None, "Buy more RAM")
-    batch.draws, alloc_err = make([]Draw_Request, draw_count)
+    rb.draws, alloc_err = make([]Draw_Request, draw_count)
     assert(alloc_err == .None, "Buy more RAM")
 
     defer if !ok {
-        delete(batch.vertices)
-        delete(batch.draws)
+        delete(rb.vertices)
+        delete(rb.draws)
     }
 
-    gl.GenVertexArrays(1, &batch.vao)
-    if batch.vao == 0 {
+    gl.GenVertexArrays(1, &rb.vao)
+    if rb.vao == 0 {
         ok = false
         return
     }
     defer if !ok {
-        gl.DeleteBuffers(1, &batch.vao)
+        gl.DeleteBuffers(1, &rb.vao)
     }
 
-    gl.GenBuffers(1, &batch.vbo)
-    if batch.vbo == 0 {
-        ok = false
-        return
-    }
+    gl.GenBuffers(1, &rb.vbo)
     defer if !ok {
-        gl.DeleteBuffers(1, &batch.vbo)
+        gl.DeleteBuffers(1, &rb.vbo)
     }
 
-    gl.BindVertexArray(batch.vao)
+    gl.BindVertexArray(rb.vao)
 
-    gl.BindBuffer(gl.ARRAY_BUFFER, batch.vbo)
+    gl.BindBuffer(gl.ARRAY_BUFFER, rb.vbo)
     gl.BufferData(gl.ARRAY_BUFFER, size_of(Vertex)*vertex_count, nil, gl.DYNAMIC_DRAW)
 
     set_vertex_attributes(Vertex)
 
-    batch.shader_primitives = shader_create_from_source(batch_vs_source, batch_fs_source) or_return
-    batch.transform_uniform = shader_uniform_location(batch.shader_primitives, "u_transform")
+    rb.shader_primitives = shader_create_from_source(batch_vs_source, batch_fs_source) or_return
+    rb.transform_uniform = shader_uniform_location(rb.shader_primitives, "u_transform")
 
     ok = true
     return
 }
 
-render_batch_destroy :: proc(batch: ^Render_Batch) {
-    delete(batch.vertices)
-    delete(batch.draws)
-    gl.DeleteBuffers(1, &batch.vbo)
-    gl.DeleteVertexArrays(1, &batch.vao)
+render_batch_destroy :: proc(rb: ^Render_Batch) {
+    delete(rb.vertices)
+    delete(rb.draws)
+    gl.DeleteBuffers(1, &rb.vbo)
+    gl.DeleteVertexArrays(1, &rb.vao)
 }
 
 // Gets needed information from type for vertex attributes
@@ -159,34 +158,67 @@ set_vertex_attributes :: proc($T: typeid) where intrinsics.type_is_struct(T) {
 }
 
 // Renders batch to current attached window
-render_batch :: proc(batch: ^Render_Batch) {
+render_batch :: proc(rb: ^Render_Batch) {
     when ODIN_DEBUG {
         assert_current_context()
         assert_opengl()
     }
 
-    gl.BindVertexArray(batch.vao)
+    gl.BindVertexArray(rb.vao)
 
-    gl.BindBuffer(gl.ARRAY_BUFFER, batch.vbo)
-    gl.BufferSubData(gl.ARRAY_BUFFER, 0, size_of(Vertex)*batch.vertices_count, raw_data(batch.vertices[:batch.vertices_count]))
+    gl.BindBuffer(gl.ARRAY_BUFFER, rb.vbo)
+    gl.BufferSubData(gl.ARRAY_BUFFER, 0, size_of(Vertex)*rb.vertices_count, raw_data(rb.vertices[:rb.vertices_count]))
 
-    shader_use(batch.shader_primitives)
+    shader_use(rb.shader_primitives)
 
     current_vertex_index: i32 = 0
-    for draw in batch.draws[:batch.draws_count] {
+    for draw in rb.draws[:rb.draws_count] {
         apply_draw_options(draw.opts)
-        transform_flat := linalg.matrix_flatten(draw.transform)
-        gl.UniformMatrix4fv(batch.transform_uniform, 1, false, raw_data(transform_flat[:]))
+        transform_flat := la.matrix_flatten(draw.transform)
+        gl.UniformMatrix4fv(rb.transform_uniform, 1, false, raw_data(transform_flat[:]))
         gl.DrawArrays(GL_Draw_Modes[draw.mode], current_vertex_index, draw.vertex_count)
         current_vertex_index += draw.vertex_count
     }
 
-    batch.draws_count = 0
-    batch.vertices_count = 0
+    rb.draws_count = 0
+    rb.vertices_count = 0
 
     // Enable some setting back
     gl.Enable(gl.DEPTH_TEST)
     gl.Enable(gl.CULL_FACE)
+}
+
+append_draw_request :: #force_inline proc(rb: ^Render_Batch, mode: Draw_Mode) {
+    draw_req := Draw_Request {
+        mode = mode,
+        transform = rb.current_transform,
+        opts = rb.draw_opts,
+    }
+    switch mode {
+    case .Line:     draw_req.vertex_count = 2
+    case .Triangle: draw_req.vertex_count = 3
+    case .Triangle_Strip:     draw_req.vertex_count = 4
+    case .None:     unreachable()
+    }
+    if rb.draws_count >= len(rb.draws) {
+        render_batch(rb)
+    }
+    rb.draws[rb.draws_count] = draw_req
+    rb.draws_count += 1
+}
+
+append_vertices :: #force_inline proc(rb: ^Render_Batch, color: Color, points: ..Vector3) {
+    for p in points {
+        v := Vertex {
+            position = p,
+            color = normalize_color(color),
+        }
+        if rb.vertices_count >= len(rb.vertices) {
+            render_batch(rb)
+        }
+        rb.vertices[rb.vertices_count] = v
+        rb.vertices_count += 1
+    }
 }
 
 apply_draw_options :: proc(opts: Draw_Opts) {
@@ -199,41 +231,9 @@ apply_draw_options :: proc(opts: Draw_Opts) {
     }
 }
 
-append_draw_request :: #force_inline proc(batch: ^Render_Batch, mode: Draw_Mode) {
-    draw_req := Draw_Request {
-        mode = mode,
-        transform = batch.current_transform,
-        opts = batch.draw_opts,
-    }
-    switch mode {
-    case .Line:     draw_req.vertex_count = 2
-    case .Triangle: draw_req.vertex_count = 3
-    case .Quad:     draw_req.vertex_count = 4
-    }
-    if batch.draws_count >= len(batch.draws) {
-        render_batch(batch)
-    }
-    batch.draws[batch.draws_count] = draw_req
-    batch.draws_count += 1
-}
-
-append_vertices :: #force_inline proc(batch: ^Render_Batch, color: Color, points: ..Vector3) {
-    for p in points {
-        v := Vertex {
-            position = p,
-            color = normalize_color(color),
-        }
-        if batch.vertices_count >= len(batch.vertices) {
-            render_batch(batch)
-        }
-        batch.vertices[batch.vertices_count] = v
-        batch.vertices_count += 1
-    }
-}
-
 import gl "vendor:OpenGL"
 import "base:runtime"
 import "base:intrinsics"
 import "core:reflect"
 import "core:fmt"
-import "core:math/linalg"
+import la "core:math/linalg"

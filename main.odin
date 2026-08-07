@@ -77,7 +77,7 @@ main :: proc() {
     }
     defer shader_delete(shader_flat)
 
-    light_pos := linalg.normalize(Vector3{ 1, 2, 2.5 })
+    light_pos := la.normalize(Vector3{ 1, 2, 2.5 })
     shader_default_uniform(shader_flat, .Light_Pos, light_pos)
 
     shader_smooth: Shader
@@ -133,7 +133,7 @@ main :: proc() {
         }
 
         for &v in vertices {
-            v.normal = linalg.normalize(v.normal)
+            v.normal = la.normalize(v.normal)
         }
     } else {
         log.warn("No model was loaded")
@@ -164,8 +164,8 @@ main :: proc() {
     time_elapsed: f32 = 0
     start_time: time.Time
 
-    scale := linalg.matrix4_scale_f32({1, 1, 1})
-    translate := linalg.matrix4_translate_f32({ 0, 0, -5 })
+    scale := la.matrix4_scale_f32({1, 1, 1})
+    translate := la.matrix4_translate_f32({ 0, 0, -5 })
 
     wireframe := false
     show_normals := false
@@ -193,7 +193,7 @@ main :: proc() {
     for !glfw.WindowShouldClose(window.handle) {
         defer free_all(context.temp_allocator)
 
-        defer glfw.PollEvents()
+        glfw.PollEvents()
 
         start_time = time.now()
         defer {
@@ -284,15 +284,15 @@ main :: proc() {
                 camera.angles.y = clamp(camera.angles.y + f32(window.mouse_delta.y)*sensitivity, -89, 89)
             }
 
-            clear_color(&window, BACKGROUND_COLOR)
+            clear_color( BACKGROUND_COLOR)
 
             current_shader := shader_flat if draw_flat_shader else shader_smooth
 
             shader_use(current_shader)
 
-            perspective := camera_perspective(camera, window_aspect(&window))
+            perspective := camera_perspective(camera, window_aspect(window.width, window.height))
             view := camera_view(camera)
-            rotate := linalg.matrix4_rotate_f32(0, { 0, 1, 0 })
+            rotate := la.matrix4_rotate_f32(0, { 0, 1, 0 })
             model := translate*rotate*scale
 
             shader_default_uniform(current_shader, .Time, time_elapsed)
@@ -315,43 +315,43 @@ main :: proc() {
                 gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
             }
 
-            rect_rot := linalg.matrix4_rotate_f32(-time_elapsed, {0, 1, 0})
-            rect_trans := linalg.matrix4_translate_f32({0, 0, -2})
+            rect_rot := la.matrix4_rotate_f32(-time_elapsed, {0, 1, 0})
+            rect_trans := la.matrix4_translate_f32({0, 0, -2})
             rect_model := rect_trans*rect_rot
 
             begin_camera_3d(&window, camera)
 
                 if show_normals {
                     for v in vertices {
-                        draw_line_3d(&window, (model*add_one_component(v.position)).xyz, (model*add_one_component(v.position + v.normal/4)).xyz, {0, 0, 255, 0xFF})
+                        draw_line_3d(&window.render_batch, (model*add_one_component(v.position)).xyz, (model*add_one_component(v.position + v.normal/4)).xyz, {0, 0, 255, 0xFF})
                     }
                 }
 
-                draw_line_3d(&window, (rect_model*Vector4{-0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5, -0.5, 0, 1}).xyz, {255, 0, 0, 0xFF})
-                draw_line_3d(&window, (rect_model*Vector4{-0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{-0.5,  0.5, 0, 1}).xyz, {255, 0, 0, 0xFF})
-                draw_line_3d(&window, (rect_model*Vector4{ 0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5,  0.5, 0, 1}).xyz, {255, 0, 0, 0xFF})
-                draw_line_3d(&window, (rect_model*Vector4{-0.5,  0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5,  0.5, 0, 1}).xyz, {255, 0, 0, 0xFF})
+                draw_line_3d(&window.render_batch, (rect_model*Vector4{-0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5, -0.5, 0, 1}).xyz, {255, 0, 0, 0xFF})
+                draw_line_3d(&window.render_batch, (rect_model*Vector4{-0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{-0.5,  0.5, 0, 1}).xyz, {255, 0, 0, 0xFF})
+                draw_line_3d(&window.render_batch, (rect_model*Vector4{ 0.5, -0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5,  0.5, 0, 1}).xyz, {255, 0, 0, 0xFF})
+                draw_line_3d(&window.render_batch, (rect_model*Vector4{-0.5,  0.5, 0, 1}).xyz, (rect_model*Vector4{ 0.5,  0.5, 0, 1}).xyz, {255, 0, 0, 0xFF})
 
-                draw_triangle_3d(&window,
+                draw_triangle_3d(&window.render_batch,
                     {-0.5, -0.5, -2},
                     { 0.5, -0.5, -2},
                     {-0.5,  0.5, -2},
                     {0, 0, 255, 0xFF}
                 )
 
-                draw_rectangle_3d(&window, {-1, 0.5, 2}, {2, 1}, 45, 45, {255, 0, 255, 0xFF})
+                draw_rectangle_3d(&window.render_batch, {-1, 0.5, 2}, {2, 1}, 45, 45, {255, 0, 255, 0xFF})
             end_camera_3d(&window)
 
             if !capture_cursor {
                 mouse_pos := vector_cast(f32, window.mouse_pos)
                 draw_triangle_2d(
-                    &window,
+                    &window.render_batch,
                     mouse_pos,
                     mouse_pos + {20, 0},
                     mouse_pos + {0, 20},
                     {255, 255, 0, 0xFF}
                 )
-                draw_line_2d(&window, mouse_pos, mouse_pos + vector_cast(f32, window.mouse_delta), {0, 0, 255, 0xFF})
+                draw_line_2d(&window.render_batch, mouse_pos, mouse_pos + vector_cast(f32, window.mouse_delta), {0, 0, 255, 0xFF})
             }
         }
 
@@ -386,28 +386,28 @@ main :: proc() {
             bounce_p1 = new_bounce_p1
             bounce_p2 = new_bounce_p2
 
-            clear_color(&window2, BACKGROUND_COLOR)
+            clear_color(BACKGROUND_COLOR)
 
-            draw_line_2d(&window2, bounce_p1, bounce_p2, {0, 255, 0, 0xFF})
+            draw_line_2d(&window2.render_batch, bounce_p1, bounce_p2, {0, 255, 0, 0xFF})
 
-            triangle_rot := linalg.matrix2_rotate(time_elapsed)
+            triangle_rot := la.matrix2_rotate(time_elapsed)
             triangle_pos := Vector2{300, 300}
 
-            draw_triangle_2d(&window2,
+            draw_triangle_2d(&window2.render_batch,
                 triangle_rot * Vector2{0,   0} + triangle_pos,
                 triangle_rot * Vector2{100, 0} + triangle_pos,
                 triangle_rot * Vector2{0, 100} + triangle_pos,
                 {0, 0, 255, 0xFF}
             )
 
-            draw_rectangle_2d(&window2, vector_cast(f32, window2.mouse_pos), {10, 10}, {255, 255, 0, 0xFF})
+            draw_rectangle_2d(&window2.render_batch, vector_cast(f32, window2.mouse_pos), {10, 10}, {255, 255, 0, 0xFF})
         }
     }
 }
 
 import gl "vendor:OpenGL"
 import "vendor:glfw"
-import "core:math/linalg"
+import la "core:math/linalg"
 import "core:time"
 import "core:log"
 import "tinyobj"

@@ -135,7 +135,7 @@ shader_default_uniform :: proc(program: Shader, $type: Default_Uniform_Type, dat
         data := data
         gl.ProgramUniform3fv(program.id, program.locs[type], 1, raw_data(&data))
     } else {
-        mat_flat := linalg.matrix_flatten(data)
+        mat_flat := la.matrix_flatten(data)
         gl.ProgramUniformMatrix4fv(program.id, program.locs[type], 1, false, raw_data(&mat_flat))
     }
 }
@@ -169,5 +169,4 @@ shader_create_from_path :: proc(vs_path, fs_path: string, allocator := context.t
 import gl "vendor:OpenGL"
 import "core:log"
 import "core:os"
-import "core:fmt"
-import "core:math/linalg"
+import la "core:math/linalg"

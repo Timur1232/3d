@@ -14,11 +14,11 @@ Window :: struct {
 
     keys: []Key_State,
 
-    mouse_buttons: []Key_State,
-    mouse_pos: Vector2_f64,
-    prev_mouse_pos: Vector2_f64,
-    mouse_delta: Vector2_f64,
-    mouse_scroll: Vector2_f64,
+    mouse_buttons:  []Key_State,
+    mouse_pos:      la.Vector2f64,
+    prev_mouse_pos: la.Vector2f64,
+    mouse_delta:    la.Vector2f64,
+    mouse_scroll:   la.Vector2f64,
 
     render_batch: Render_Batch,
 
@@ -52,7 +52,7 @@ init_window :: proc(window: ^Window, width, height: i32, title: string, debug :=
 
     window_handle := glfw.CreateWindow(width, height, to_csrt_temp(title), nil, nil)
     if window_handle == nil {
-        err = Create_Window_Error_Enum.Create_Window_Err
+        err = .Create_Window_Err
         return
     }
     window.handle = window_handle
@@ -107,7 +107,7 @@ init_window :: proc(window: ^Window, width, height: i32, title: string, debug :=
 
     if ok := render_batch_init(&window.render_batch, DEFAULT_RENDER_BATCH_VERTEX_CAPACITY, DEFAULT_RENDER_BATCH_DRAWS_CAPACITY); !ok {
         log.error("Unable to initialize render batch")
-        err = Create_Window_Error_Enum.Init_Render_Batch_Err
+        err = .Init_Render_Batch_Err
         return
     }
 
@@ -135,15 +135,15 @@ get_current_window :: #force_inline proc "contextless" () -> ^Window {
     current_handle := glfw.GetCurrentContext()
     if current_handle != nil {
         current_window := cast(^Window)glfw.GetWindowUserPointer(current_handle)
-        assert_contextless(current_window != nil)
+        assert_current_context(current_window)
         return current_window
     }
     return nil
 }
 
+// NOTE: We shouldn't assert window as current context because events polled for all windows at once
 get_window_from_handle :: #force_inline proc "contextless" (handle: glfw.WindowHandle) -> ^Window {
     w := cast(^Window)glfw.GetWindowUserPointer(handle)
-    assert_contextless(w != nil)
     return w
 }
 
@@ -170,11 +170,12 @@ clear_context :: proc "contextless" () {
 
 start_frame :: #force_inline proc(w: ^Window) {
     make_context(w)
-    begin_drawing(w)
+    begin_drawing(&w.render_batch, w.width, w.height)
 }
 
 end_frame :: proc(w: ^Window) {
-    end_drawing(w)
+    assert_current_context(w)
+    end_drawing(&w.render_batch)
 
     // Frames increment must be before polling events, so logic for saving frames for key presses would work.
     w.frames_count += 1
@@ -187,8 +188,8 @@ end_frame :: proc(w: ^Window) {
     w.mouse_delta = 0
 }
 
-window_aspect :: #force_inline proc(w: ^Window) -> f32 {
-    return f32(w.width) / f32(w.height)
+window_aspect :: #force_inline proc(width, height: i32) -> f32 {
+    return f32(width) / f32(height)
 }
 
 // ===============================[Input]=============================== //
@@ -279,18 +280,34 @@ mouse_cursor_enter_callback :: proc "c" (window: glfw.WindowHandle, entered: i32
 // ===============================[Other]=============================== //
 
 // Orthogonal view matrix of the window for 2D rendering (makes 1 unit = 1 pixel)
-window_ortho :: #force_inline proc(window: ^Window) -> Mat4 {
-    return linalg.matrix_ortho3d_f32(0, f32(window.width), f32(window.height), 0, 0, math.F32_MAX)
+window_ortho :: #force_inline proc(width, height: i32) -> Mat4 {
+    return la.matrix_ortho3d_f32(0, f32(width), f32(height), 0, 0, math.F32_MAX)
 }
 
 window_valid :: #force_inline proc(w: ^Window) -> bool {
     return w.handle != nil
 }
 
-clear_color :: #force_inline proc(w: ^Window, color: Color) {
+clear_color :: #force_inline proc(color: Color) {
     color_norm := normalize_color(color)
     gl.ClearColor(color_norm.r, color_norm.g, color_norm.b, color_norm.a)
     gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+}
+
+@(disabled=ODIN_DISABLE_ASSERT)
+assert_context_global :: #force_inline proc "contextless" (message := "Current context must be set", loc := #caller_location) {
+    w := get_current_window()
+    assert_contextless(w != nil, message, loc)
+}
+
+@(disabled=ODIN_DISABLE_ASSERT)
+assert_context_window :: #force_inline proc "contextless" (window: ^Window, message := "Current context must be set", loc := #caller_location) {
+    assert_contextless(window.is_current_context, message, loc)
+}
+
+assert_current_context :: proc{
+    assert_context_global,
+    assert_context_window,
 }
 
 import "vendor:glfw"
@@ -299,4 +316,4 @@ import "base:runtime"
 import "core:c/libc"
 import "core:log"
 import "core:math"
-import "core:math/linalg"
+import la "core:math/linalg"
